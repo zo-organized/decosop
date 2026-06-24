@@ -29,6 +29,10 @@ else
                 @(isFavorited ? "\u2605" : "\u2606")
             </button>
             <div class="sop-actions">
+                @if (openUri is not null)
+                {
+                    <a class="btn btn-sm btn-success" href="@openUri">Open in @openApp</a>
+                }
                 @if (canPreview)
                 {
                     <button class="btn btn-sm btn-outline-secondary" @onclick="PrintDocument">Print</button>
@@ -150,17 +154,24 @@ else
     private bool isReplacing;
     private string replaceError = string.Empty;
     private IBrowserFile? replaceFile;
+    private string? openUri;
+    private string? openApp;
 
     protected override async Task OnParametersSetAsync()
     {
         document = await Cache.RunExclusiveAsync(() => SopFileService.GetDocumentAsync(Id));
         pdfLoaded = false;
         converting = false;
+        openUri = null;
+        openApp = null;
         if (document is not null)
         {
             categoryPath = await Cache.RunExclusiveAsync(() => SopFileService.GetCategoryPathAsync(document.CategoryId));
             var prefs = await Cache.GetSopFilePrefsAsync();
             isFavorited = prefs.TryGetValue(Id, out var p) && p.IsFavorited;
+            openApp = OfficeProtocol.For(document.FileName)?.App;
+            openUri = OfficeProtocol.OpenForEditUri(document.FileName, document.StoredFileName,
+                DecoSOP.Services.SopFileService.OpenBase, SopFileService.GetFilePath(document));
         }
     }
 

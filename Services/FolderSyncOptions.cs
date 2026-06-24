@@ -16,6 +16,12 @@ public class FolderSyncOptions
 
     public class RootConfig
     {
+        /// <summary>Where the server reads/writes files (OneDrive-synced folder, share, or local).</summary>
         public string? Root { get; set; }
+
+        /// <summary>Client-reachable base for "Open in Office" links: a UNC share (\\server\SOPs)
+        /// or a SharePoint/OneDrive web URL (https://tenant.sharepoint.com/.../SOPs). If empty,
+        /// the server's local path is used (only works when the client is the server).</summary>
+        public string? OpenBase { get; set; }
     }
 }

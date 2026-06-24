@@ -44,6 +44,8 @@ if (folderSync.Enabled)
 {
     if (!string.IsNullOrWhiteSpace(folderSync.Sop.Root)) SopFileService.SyncRoot = folderSync.Sop.Root;
     if (!string.IsNullOrWhiteSpace(folderSync.Doc.Root)) DocumentService.SyncRoot = folderSync.Doc.Root;
+    SopFileService.OpenBase = folderSync.Sop.OpenBase;
+    DocumentService.OpenBase = folderSync.Doc.OpenBase;
 }
 
 builder.Services.AddDbContext<AppDbContext>(options =>

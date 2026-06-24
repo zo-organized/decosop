@@ -15,6 +15,9 @@ public class DocumentService
     /// (e.g. a OneDrive-synced folder or network share) instead of the local doc-uploads dir.</summary>
     public static string? SyncRoot { get; set; }
 
+    /// <summary>Client-facing base (UNC or SharePoint/OneDrive URL) for "Open in Office" links.</summary>
+    public static string? OpenBase { get; set; }
+
     public DocumentService(AppDbContext db) => _db = db;
 
     private static void ValidateName(string? name, string field = "Name")
