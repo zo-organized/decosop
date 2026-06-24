@@ -3,9 +3,7 @@
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
 @inject SopFileService SopFileService
-@inject WebSopService WebSopService
 @inject DocumentService DocService
-@inject WebDocService WebDocService
 @inject DataCacheService Cache
 @inject IJSRuntime JS
 @implements IDisposable
@@ -98,12 +96,8 @@
     {
         (CategoryType.Sop, ItemKind.Category) => nameof(SopCategory),
         (CategoryType.Sop, ItemKind.Document) => nameof(SopFile),
-        (CategoryType.WebSop, ItemKind.Category) => nameof(Category),
-        (CategoryType.WebSop, ItemKind.Document) => nameof(SopDocument),
         (CategoryType.Document, ItemKind.Category) => nameof(DocumentCategory),
         (CategoryType.Document, ItemKind.Document) => nameof(OfficeDocument),
-        (CategoryType.WebDoc, ItemKind.Category) => nameof(WebDocCategory),
-        (CategoryType.WebDoc, ItemKind.Document) => nameof(WebDocument),
         _ => throw new InvalidOperationException()
     };
 
@@ -151,12 +145,8 @@
 
             if (MenuState.Type == CategoryType.Sop)
                 await Cache.RunExclusiveAsync(() => SopFileService.RenameCategoryAsync(MenuState.CategoryId, newName));
-            else if (MenuState.Type == CategoryType.WebSop)
-                await Cache.RunExclusiveAsync(() => WebSopService.RenameCategoryAsync(MenuState.CategoryId, newName));
-            else if (MenuState.Type == CategoryType.Document)
-                await Cache.RunExclusiveAsync(() => DocService.RenameCategoryAsync(MenuState.CategoryId, newName));
             else
-                await Cache.RunExclusiveAsync(() => WebDocService.RenameCategoryAsync(MenuState.CategoryId, newName));
+                await Cache.RunExclusiveAsync(() => DocService.RenameCategoryAsync(MenuState.CategoryId, newName));
 
             await MenuState.NotifyCategoryModified();
         }
@@ -175,12 +165,8 @@
             {
                 if (MenuState.Type == CategoryType.Sop)
                     await Cache.RunExclusiveAsync(() => SopFileService.DeleteCategoryAsync(MenuState.CategoryId));
-                else if (MenuState.Type == CategoryType.WebSop)
-                    await Cache.RunExclusiveAsync(() => WebSopService.DeleteCategoryAsync(MenuState.CategoryId));
-                else if (MenuState.Type == CategoryType.Document)
-                    await Cache.RunExclusiveAsync(() => DocService.DeleteCategoryAsync(MenuState.CategoryId));
                 else
-                    await Cache.RunExclusiveAsync(() => WebDocService.DeleteCategoryAsync(MenuState.CategoryId));
+                    await Cache.RunExclusiveAsync(() => DocService.DeleteCategoryAsync(MenuState.CategoryId));
 
                 await MenuState.NotifyCategoryModified();
             }

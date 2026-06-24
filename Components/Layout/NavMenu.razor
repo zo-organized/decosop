@@ -2,9 +2,7 @@
 @using DecoSOP.Models
 @inject DataCacheService Cache
 @inject SopFileService SopFileService
-@inject WebSopService WebSopService
 @inject DocumentService DocService
-@inject WebDocService WebDocService
 @inject NavigationManager Nav
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
@@ -21,9 +19,7 @@
 
 <div class="mode-toggle px-3 py-2" data-mode="@currentMode">
     <button class="mode-toggle-btn @(currentMode == "sop" ? "active" : "")" @onclick="@(() => SwitchMode("sop"))">SOPs</button>
-    <button class="mode-toggle-btn @(currentMode == "websop" ? "active" : "")" @onclick="@(() => SwitchMode("websop"))">Web SOPs</button>
     <button class="mode-toggle-btn @(currentMode == "doc" ? "active" : "")" @onclick="@(() => SwitchMode("doc"))">Docs</button>
-    <button class="mode-toggle-btn @(currentMode == "webdoc" ? "active" : "")" @onclick="@(() => SwitchMode("webdoc"))">Web Docs</button>
 </div>
 
 <div class="sidebar-content">
@@ -74,33 +70,6 @@
                     }
                 }
 
-                @if (webSopFavoriteCategories.Count > 0 || webSopFavoriteDocuments.Count > 0)
-                {
-                    <div class="nav-section px-3">
-                        <span class="nav-section-toggle" style="cursor:default;">
-                            <span class="nav-section-title">Web SOPs</span>
-                        </span>
-                    </div>
-                    @foreach (var cat in webSopFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"websops/category/{cat.Id}")">
-                                <FolderIcon Color="@GetWebSopCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in webSopFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"websops/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-
                 @if (docFavoriteCategories.Count > 0 || docFavoriteDocuments.Count > 0)
                 {
                     <div class="nav-section px-3">
@@ -128,37 +97,8 @@
                     }
                 }
 
-                @if (webDocFavoriteCategories.Count > 0 || webDocFavoriteDocuments.Count > 0)
-                {
-                    <div class="nav-section px-3">
-                        <span class="nav-section-toggle" style="cursor:default;">
-                            <span class="nav-section-title">Web Docs</span>
-                        </span>
-                    </div>
-                    @foreach (var cat in webDocFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"webdocs/category/{cat.Id}")">
-                                <FolderIcon Color="@GetWebDocCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in webDocFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"webdocs/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-
                 @if (sopFavoriteCategories.Count == 0 && sopFavoriteDocuments.Count == 0
-                  && webSopFavoriteCategories.Count == 0 && webSopFavoriteDocuments.Count == 0
-                  && docFavoriteCategories.Count == 0 && docFavoriteDocuments.Count == 0
-                  && webDocFavoriteCategories.Count == 0 && webDocFavoriteDocuments.Count == 0)
+                  && docFavoriteCategories.Count == 0 && docFavoriteDocuments.Count == 0)
                 {
                     <div class="px-3 py-2 text-muted small">No favorites yet.</div>
                 }
@@ -179,39 +119,7 @@
             <span class="nav-section-title">Search Results</span>
         </div>
 
-        @if (currentMode == "sop")
-        {
-            @foreach (var doc in sopSearchResults)
-            {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
-                        @doc.Title
-                        <span class="nav-category-hint">@doc.Category.Name</span>
-                    </NavLink>
-                </div>
-            }
-            @if (sopSearchResults.Count == 0)
-            {
-                <div class="px-3 py-2 text-muted small">No results found.</div>
-            }
-        }
-        else if (currentMode == "websop")
-        {
-            @foreach (var doc in webSopSearchResults)
-            {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"websops/{doc.Id}")">
-                        @doc.Title
-                        <span class="nav-category-hint">@doc.Category.Name</span>
-                    </NavLink>
-                </div>
-            }
-            @if (webSopSearchResults.Count == 0)
-            {
-                <div class="px-3 py-2 text-muted small">No results found.</div>
-            }
-        }
-        else if (currentMode == "doc")
+        @if (currentMode == "doc")
         {
             @foreach (var doc in docSearchResults)
             {
@@ -229,16 +137,16 @@
         }
         else
         {
-            @foreach (var doc in webDocSearchResults)
+            @foreach (var doc in sopSearchResults)
             {
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"webdocs/{doc.Id}")">
+                    <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
                         @doc.Title
                         <span class="nav-category-hint">@doc.Category.Name</span>
                     </NavLink>
                 </div>
             }
-            @if (webDocSearchResults.Count == 0)
+            @if (sopSearchResults.Count == 0)
             {
                 <div class="px-3 py-2 text-muted small">No results found.</div>
             }
@@ -259,49 +167,7 @@
 
             @if (favoritesExpanded)
             {
-                @if (currentMode == "sop")
-                {
-                    @foreach (var cat in sopFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/category/{cat.Id}")">
-                                <FolderIcon Color="@GetSopCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in sopFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-                else if (currentMode == "websop")
-                {
-                    @foreach (var cat in webSopFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"websops/category/{cat.Id}")">
-                                <FolderIcon Color="@GetWebSopCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in webSopFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"websops/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-                else if (currentMode == "doc")
+                @if (currentMode == "doc")
                 {
                     @foreach (var cat in docFavoriteCategories)
                     {
@@ -324,19 +190,19 @@
                 }
                 else
                 {
-                    @foreach (var cat in webDocFavoriteCategories)
+                    @foreach (var cat in sopFavoriteCategories)
                     {
                         <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"webdocs/category/{cat.Id}")">
-                                <FolderIcon Color="@GetWebDocCatColor(cat.Id)" />@cat.Name
+                            <NavLink class="nav-link" href="@($"sops/category/{cat.Id}")">
+                                <FolderIcon Color="@GetSopCatColor(cat.Id)" />@cat.Name
                                 <span class="nav-category-hint">folder</span>
                             </NavLink>
                         </div>
                     }
-                    @foreach (var doc in webDocFavoriteDocuments)
+                    @foreach (var doc in sopFavoriteDocuments)
                     {
                         <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"webdocs/{doc.Id}")">
+                            <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
                                 @doc.Title
                                 <span class="nav-category-hint">@doc.Category.Name</span>
                             </NavLink>
@@ -365,20 +231,6 @@
                     </div>
                 }
             }
-            else if (currentMode == "sop")
-            {
-                @foreach (var category in sopCategories!.OrderByDescending(c => IsSopCatPinned(c.Id)).ThenBy(c => c.Name))
-                {
-                    @RenderSopCategoryTree(category, 0)
-                }
-            }
-            else if (currentMode == "websop")
-            {
-                @foreach (var category in webSopCategories!.OrderByDescending(c => IsWebSopCatPinned(c.Id)).ThenBy(c => c.Name))
-                {
-                    @RenderWebSopCategoryTree(category, 0)
-                }
-            }
             else if (currentMode == "doc")
             {
                 @foreach (var category in docCategories!.OrderByDescending(c => IsDocCatPinned(c.Id)).ThenBy(c => c.Name))
@@ -388,9 +240,9 @@
             }
             else
             {
-                @foreach (var category in webDocCategories!.OrderByDescending(c => IsWebDocCatPinned(c.Id)).ThenBy(c => c.Name))
+                @foreach (var category in sopCategories!.OrderByDescending(c => IsSopCatPinned(c.Id)).ThenBy(c => c.Name))
                 {
-                    @RenderWebDocCategoryTree(category, 0)
+                    @RenderSopCategoryTree(category, 0)
                 }
             }
         </nav>
@@ -414,48 +266,26 @@
     private List<SopFile> sopFavoriteDocuments = [];
     private List<SopFile> sopSearchResults = [];
 
-    private List<Category>? webSopCategories;
-    private List<Category> webSopFavoriteCategories = [];
-    private List<SopDocument> webSopFavoriteDocuments = [];
-    private List<SopDocument> webSopSearchResults = [];
-
     private List<DocumentCategory>? docCategories;
     private List<DocumentCategory> docFavoriteCategories = [];
     private List<OfficeDocument> docFavoriteDocuments = [];
     private List<OfficeDocument> docSearchResults = [];
 
-    private List<WebDocCategory>? webDocCategories;
-    private List<WebDocCategory> webDocFavoriteCategories = [];
-    private List<WebDocument> webDocFavoriteDocuments = [];
-    private List<WebDocument> webDocSearchResults = [];
-
     // --- Per-user preference dictionaries ---
     private Dictionary<int, UserPreference> sopCatPrefs = new();
-    private Dictionary<int, UserPreference> webSopCatPrefs = new();
     private Dictionary<int, UserPreference> docCatPrefs = new();
-    private Dictionary<int, UserPreference> webDocCatPrefs = new();
 
     private bool IsSopCatFavorited(int id) => sopCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
     private bool IsSopCatPinned(int id) => sopCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
     private string? GetSopCatColor(int id) => sopCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
 
-    private bool IsWebSopCatFavorited(int id) => webSopCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
-    private bool IsWebSopCatPinned(int id) => webSopCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
-    private string? GetWebSopCatColor(int id) => webSopCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
-
     private bool IsDocCatFavorited(int id) => docCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
     private bool IsDocCatPinned(int id) => docCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
     private string? GetDocCatColor(int id) => docCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
 
-    private bool IsWebDocCatFavorited(int id) => webDocCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
-    private bool IsWebDocCatPinned(int id) => webDocCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
-    private string? GetWebDocCatColor(int id) => webDocCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
-
     // --- Shared state ---
     private HashSet<int> expandedSopCategories = [];
-    private HashSet<int> expandedWebSopCategories = [];
     private HashSet<int> expandedDocCategories = [];
-    private HashSet<int> expandedWebDocCategories = [];
     private string searchQuery = string.Empty;
     private bool isSearching => !string.IsNullOrWhiteSpace(searchQuery);
     private bool favoritesExpanded = true;
@@ -464,52 +294,40 @@
     private bool _favoritesLoaded;
 
     private string currentMode => Nav.Uri.Contains("/favorites", StringComparison.OrdinalIgnoreCase) ? "favorites"
-                                : Nav.Uri.Contains("/webdocs", StringComparison.OrdinalIgnoreCase) ? "webdoc"
                                 : Nav.Uri.Contains("/documents", StringComparison.OrdinalIgnoreCase) ? "doc"
-                                : Nav.Uri.Contains("/websops", StringComparison.OrdinalIgnoreCase) ? "websop"
                                 : "sop";
 
     private object? currentModeCategories => currentMode switch
     {
         "favorites" => _favoritesLoaded ? (object)true : null,
-        "websop" => webSopCategories,
         "doc" => docCategories,
-        "webdoc" => webDocCategories,
         _ => sopCategories
     };
 
     private string searchPlaceholder => currentMode switch
     {
-        "websop" => "Search web SOPs...",
         "doc" => "Search documents...",
-        "webdoc" => "Search web docs...",
         _ => "Search SOPs..."
     };
 
     private string homeHref => currentMode switch
     {
         "favorites" => "favorites",
-        "websop" => "websops",
         "doc" => "documents",
-        "webdoc" => "webdocs",
         _ => ""
     };
 
     private bool hasFavorites => currentMode switch
     {
         "favorites" => false,
-        "websop" => webSopFavoriteCategories.Count > 0 || webSopFavoriteDocuments.Count > 0,
         "doc" => docFavoriteCategories.Count > 0 || docFavoriteDocuments.Count > 0,
-        "webdoc" => webDocFavoriteCategories.Count > 0 || webDocFavoriteDocuments.Count > 0,
         _ => sopFavoriteCategories.Count > 0 || sopFavoriteDocuments.Count > 0
     };
 
     private int favoritesCount => currentMode switch
     {
         "favorites" => 0,
-        "websop" => webSopFavoriteCategories.Count + webSopFavoriteDocuments.Count,
         "doc" => docFavoriteCategories.Count + docFavoriteDocuments.Count,
-        "webdoc" => webDocFavoriteCategories.Count + webDocFavoriteDocuments.Count,
         _ => sopFavoriteCategories.Count + sopFavoriteDocuments.Count
     };
 
@@ -538,7 +356,7 @@
             await Task.Run(async () => await LoadModeData(mode), _cts.Token);
             StateHasChanged();
 
-            foreach (var m in new[] { "sop", "websop", "doc", "webdoc" })
+            foreach (var m in new[] { "sop", "doc" })
             {
                 if (m != mode)
                     await Task.Run(async () => await LoadModeData(m), _cts.Token);
@@ -570,9 +388,7 @@
             {
                 searchQuery = string.Empty;
                 sopSearchResults = [];
-                webSopSearchResults = [];
                 docSearchResults = [];
-                webDocSearchResults = [];
                 StateHasChanged();
             });
 
@@ -601,9 +417,7 @@
         searchQuery = string.Empty;
         Nav.NavigateTo(mode switch
         {
-            "websop" => "/websops",
             "doc" => "/documents",
-            "webdoc" => "/webdocs",
             _ => "/"
         });
     }
@@ -615,35 +429,17 @@
             case "favorites":
                 sopFavoriteCategories = await Cache.GetSopFavoriteCategoriesAsync();
                 sopFavoriteDocuments = await Cache.GetSopFavoriteDocumentsAsync();
-                webSopFavoriteCategories = await Cache.GetWebSopFavoriteCategoriesAsync();
-                webSopFavoriteDocuments = await Cache.GetWebSopFavoriteDocumentsAsync();
                 docFavoriteCategories = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavoriteDocuments = await Cache.GetDocFavoriteDocumentsAsync();
-                webDocFavoriteCategories = await Cache.GetWebDocFavoriteCategoriesAsync();
-                webDocFavoriteDocuments = await Cache.GetWebDocFavoriteDocumentsAsync();
                 sopCatPrefs = await Cache.GetSopCategoryPrefsAsync();
-                webSopCatPrefs = await Cache.GetWebSopCategoryPrefsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                webDocCatPrefs = await Cache.GetWebDocCategoryPrefsAsync();
                 _favoritesLoaded = true;
-                break;
-            case "websop":
-                webSopCategories = await Cache.GetWebSopTreeAsync();
-                webSopFavoriteCategories = await Cache.GetWebSopFavoriteCategoriesAsync();
-                webSopFavoriteDocuments = await Cache.GetWebSopFavoriteDocumentsAsync();
-                webSopCatPrefs = await Cache.GetWebSopCategoryPrefsAsync();
                 break;
             case "doc":
                 docCategories = await Cache.GetDocTreeAsync();
                 docFavoriteCategories = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavoriteDocuments = await Cache.GetDocFavoriteDocumentsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                break;
-            case "webdoc":
-                webDocCategories = await Cache.GetWebDocTreeAsync();
-                webDocFavoriteCategories = await Cache.GetWebDocFavoriteCategoriesAsync();
-                webDocFavoriteDocuments = await Cache.GetWebDocFavoriteDocumentsAsync();
-                webDocCatPrefs = await Cache.GetWebDocCategoryPrefsAsync();
                 break;
             default:
                 sopCategories = await Cache.GetSopTreeAsync();
@@ -712,64 +508,6 @@
         }
     };
 
-    // --- Web SOP (HTML editor) tree ---
-
-    private bool IsWebSopExpanded(int id) => expandedWebSopCategories.Contains(id);
-
-    private void ToggleWebSopCategory(int id)
-    {
-        if (!expandedWebSopCategories.Remove(id))
-            expandedWebSopCategories.Add(id);
-    }
-
-    private int GetWebSopDocCount(Category cat)
-    {
-        int count = cat.Documents.Count;
-        foreach (var child in cat.Children)
-            count += GetWebSopDocCount(child);
-        return count;
-    }
-
-    private RenderFragment RenderWebSopCategoryTree(Category category, int depth) => __builder =>
-    {
-        var paddingLeft = $"{1 + depth * 0.75}rem";
-        var docPaddingLeft = $"{1.75 + depth * 0.75}rem";
-        var totalCount = GetWebSopDocCount(category);
-
-        <div class="nav-section" style="padding-left: @paddingLeft;"
-             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsWebSopCatFavorited(category.Id), IsWebSopCatPinned(category.Id), GetWebSopCatColor(category.Id), CategoryType.WebSop)"
-             @oncontextmenu:preventDefault="true">
-            <button class="nav-section-toggle" @onclick="() => ToggleWebSopCategory(category.Id)">
-                <span class="toggle-icon">@(IsWebSopExpanded(category.Id) ? "▾" : "▸")</span>
-                <span class="nav-section-title"><FolderIcon Color="@GetWebSopCatColor(category.Id)" />@category.Name@if (IsWebSopCatPinned(category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
-                <span class="nav-section-count">@totalCount</span>
-            </button>
-        </div>
-
-        @if (IsWebSopExpanded(category.Id))
-        {
-            @foreach (var child in category.Children.OrderByDescending(c => IsWebSopCatPinned(c.Id)).ThenBy(c => c.Name))
-            {
-                @RenderWebSopCategoryTree(child, depth + 1)
-            }
-
-            @foreach (var doc in category.Documents)
-            {
-                <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                    <NavLink class="nav-link" href="@($"websops/{doc.Id}")">
-                        @doc.Title
-                    </NavLink>
-                </div>
-            }
-
-            <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                <NavLink class="nav-link nav-link-new" href="@($"websops/new?categoryId={category.Id}")">
-                    + New Web SOP
-                </NavLink>
-            </div>
-        }
-    };
-
     // --- Document tree ---
 
     private bool IsDocExpanded(int id) => expandedDocCategories.Contains(id);
@@ -828,64 +566,6 @@
         }
     };
 
-    // --- Web Doc tree ---
-
-    private bool IsWebDocExpanded(int id) => expandedWebDocCategories.Contains(id);
-
-    private void ToggleWebDocCategory(int id)
-    {
-        if (!expandedWebDocCategories.Remove(id))
-            expandedWebDocCategories.Add(id);
-    }
-
-    private int GetWebDocCount(WebDocCategory cat)
-    {
-        int count = cat.Documents.Count;
-        foreach (var child in cat.Children)
-            count += GetWebDocCount(child);
-        return count;
-    }
-
-    private RenderFragment RenderWebDocCategoryTree(WebDocCategory category, int depth) => __builder =>
-    {
-        var paddingLeft = $"{1 + depth * 0.75}rem";
-        var docPaddingLeft = $"{1.75 + depth * 0.75}rem";
-        var totalCount = GetWebDocCount(category);
-
-        <div class="nav-section" style="padding-left: @paddingLeft;"
-             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsWebDocCatFavorited(category.Id), IsWebDocCatPinned(category.Id), GetWebDocCatColor(category.Id), CategoryType.WebDoc)"
-             @oncontextmenu:preventDefault="true">
-            <button class="nav-section-toggle" @onclick="() => ToggleWebDocCategory(category.Id)">
-                <span class="toggle-icon">@(IsWebDocExpanded(category.Id) ? "▾" : "▸")</span>
-                <span class="nav-section-title"><FolderIcon Color="@GetWebDocCatColor(category.Id)" />@category.Name@if (IsWebDocCatPinned(category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
-                <span class="nav-section-count">@totalCount</span>
-            </button>
-        </div>
-
-        @if (IsWebDocExpanded(category.Id))
-        {
-            @foreach (var child in category.Children.OrderByDescending(c => IsWebDocCatPinned(c.Id)).ThenBy(c => c.Name))
-            {
-                @RenderWebDocCategoryTree(child, depth + 1)
-            }
-
-            @foreach (var doc in category.Documents)
-            {
-                <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                    <NavLink class="nav-link" href="@($"webdocs/{doc.Id}")">
-                        @doc.Title
-                    </NavLink>
-                </div>
-            }
-
-            <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                <NavLink class="nav-link nav-link-new" href="@($"webdocs/new?categoryId={category.Id}")">
-                    + New Web Doc
-                </NavLink>
-            </div>
-        }
-    };
-
     // --- Search ---
 
     private async Task OnSearchKeyUp()
@@ -896,9 +576,7 @@
         if (string.IsNullOrWhiteSpace(searchQuery))
         {
             sopSearchResults = [];
-            webSopSearchResults = [];
             docSearchResults = [];
-            webDocSearchResults = [];
             return;
         }
 
@@ -908,12 +586,8 @@
             debounceTimer?.Stop();
             await InvokeAsync(async () =>
             {
-                if (currentMode == "websop")
-                    webSopSearchResults = await Cache.RunExclusiveAsync(() => WebSopService.SearchAsync(searchQuery));
-                else if (currentMode == "doc")
+                if (currentMode == "doc")
                     docSearchResults = await Cache.RunExclusiveAsync(() => DocService.SearchAsync(searchQuery));
-                else if (currentMode == "webdoc")
-                    webDocSearchResults = await Cache.RunExclusiveAsync(() => WebDocService.SearchAsync(searchQuery));
                 else
                     sopSearchResults = await Cache.RunExclusiveAsync(() => SopFileService.SearchAsync(searchQuery));
                 StateHasChanged();

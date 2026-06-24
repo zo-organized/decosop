@@ -2,10 +2,8 @@
 @using DecoSOP.Services
 @using DecoSOP.Models
 @inject SopFileService SopFileService
-@inject WebSopService WebSopService
 @inject UserPreferenceService Prefs
 @inject DataCacheService Cache
-@inject ContextMenuState MenuState
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -34,10 +32,6 @@ else
                 {
                     <button class="btn btn-sm btn-outline-secondary" @onclick="PrintDocument">Print</button>
                 }
-                @if (canConvertToWeb)
-                {
-                    <button class="btn btn-sm btn-outline-primary" @onclick="ToggleConvertPanel">Convert to Web SOP</button>
-                }
                 <a class="btn btn-sm btn-primary" href="/api/sops/@document.Id/download" target="_blank">Download</a>
                 <button class="btn btn-sm btn-outline-danger" @onclick="ConfirmDelete">Delete</button>
             </div>
@@ -49,38 +43,6 @@ else
                 <span>Delete "<strong>@document.Title</strong>"? This cannot be undone.</span>
                 <button class="btn btn-sm btn-danger" @onclick="Delete">Yes, delete</button>
                 <button class="btn btn-sm btn-secondary" @onclick="() => showDeleteConfirm = false">Cancel</button>
-            </div>
-        }
-
-        @if (showConvertPanel)
-        {
-            <div class="alert alert-info mt-2">
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span>Create an editable Web SOP from this file in:</span>
-                    <select class="form-select form-select-sm" style="max-width: 360px;"
-                            @bind="convertCategoryId" disabled="@isConverting">
-                        @if (webSopCategoryOptions is not null)
-                        {
-                            @foreach (var opt in webSopCategoryOptions)
-                            {
-                                <option value="@opt.Id">@opt.Path</option>
-                            }
-                        }
-                    </select>
-                    <button class="btn btn-sm btn-primary" @onclick="DoConvert"
-                            disabled="@(isConverting || convertCategoryId == 0)">
-                        @(isConverting ? "Converting..." : "Convert")
-                    </button>
-                    <button class="btn btn-sm btn-secondary" @onclick="() => showConvertPanel = false" disabled="@isConverting">Cancel</button>
-                </div>
-                @if (isConverting)
-                {
-                    <div class="mt-2 text-muted small">Converting with LibreOffice — this can take a few seconds for large files.</div>
-                }
-                @if (!string.IsNullOrEmpty(convertError))
-                {
-                    <div class="mt-2 text-danger small">@convertError</div>
-                }
             </div>
         }
 
@@ -163,13 +125,6 @@ else
     private bool isImage => document?.ContentType?.StartsWith("image/") == true;
     private bool isConvertible => PdfConversionService.CanConvert(document?.FileName ?? "");
     private bool canPreview => isPdf || isImage || isConvertible;
-    private bool canConvertToWeb => OfficeHtmlImportService.CanConvert(document?.FileName ?? "");
-
-    private bool showConvertPanel;
-    private bool isConverting;
-    private string convertError = string.Empty;
-    private int convertCategoryId;
-    private List<(int Id, string Path)>? webSopCategoryOptions;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -232,63 +187,6 @@ else
         {
             var previewUrl = $"/api/sops/{document.Id}/preview";
             await JS.InvokeVoidAsync("documentInterop.printFile", previewUrl, document.ContentType, document.Title);
-        }
-    }
-
-    private async Task ToggleConvertPanel()
-    {
-        showConvertPanel = !showConvertPanel;
-        convertError = string.Empty;
-
-        if (showConvertPanel && webSopCategoryOptions is null)
-        {
-            var allCats = await Cache.RunExclusiveAsync(() => WebSopService.GetAllCategoriesAsync());
-            var lookup = allCats.ToDictionary(c => c.Id);
-            webSopCategoryOptions = allCats.Select(c =>
-            {
-                var parts = new List<string>();
-                var cur = c;
-                while (cur is not null)
-                {
-                    parts.Insert(0, cur.Name);
-                    cur = cur.ParentId.HasValue && lookup.ContainsKey(cur.ParentId.Value) ? lookup[cur.ParentId.Value] : null;
-                }
-                return (c.Id, Path: string.Join(" / ", parts));
-            }).OrderBy(x => x.Path).ToList();
-            convertCategoryId = webSopCategoryOptions.FirstOrDefault().Id;
-        }
-    }
-
-    private async Task DoConvert()
-    {
-        if (document is null || convertCategoryId == 0) return;
-
-        isConverting = true;
-        convertError = string.Empty;
-        StateHasChanged();
-
-        try
-        {
-            var filePath = SopFileService.GetFilePath(document);
-            var html = await OfficeHtmlImportService.ConvertToHtmlAsync(filePath);
-            if (string.IsNullOrWhiteSpace(html))
-            {
-                convertError = "Conversion failed. The file type may be unsupported, or LibreOffice is unavailable.";
-                isConverting = false;
-                return;
-            }
-
-            var title = await Cache.RunExclusiveAsync(() => WebSopService.GetUniqueTitleAsync(convertCategoryId, document.Title));
-            var doc = await Cache.RunExclusiveAsync(() => WebSopService.CreateDocumentAsync(convertCategoryId, title));
-            await Cache.RunExclusiveAsync(() => WebSopService.UpdateDocumentAsync(doc.Id, title, html));
-            Cache.InvalidateAll();
-            await MenuState.NotifyCategoryModified();
-            Nav.NavigateTo($"/websops/{doc.Id}");
-        }
-        catch (Exception ex)
-        {
-            convertError = ex.InnerException?.Message ?? ex.Message;
-            isConverting = false;
         }
     }
 

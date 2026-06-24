@@ -32,28 +32,12 @@
                     <span>@stats.SopFileCount</span>
                 </div>
                 <div class="doc-meta-row">
-                    <span class="doc-meta-label">Web SOP Categories</span>
-                    <span>@stats.WebSopCategoryCount</span>
-                </div>
-                <div class="doc-meta-row">
-                    <span class="doc-meta-label">Web SOPs</span>
-                    <span>@stats.WebSopDocumentCount</span>
-                </div>
-                <div class="doc-meta-row">
                     <span class="doc-meta-label">Doc Categories</span>
                     <span>@stats.DocCategoryCount</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Documents</span>
                     <span>@stats.OfficeDocumentCount</span>
-                </div>
-                <div class="doc-meta-row">
-                    <span class="doc-meta-label">Web Doc Categories</span>
-                    <span>@stats.WebDocCategoryCount</span>
-                </div>
-                <div class="doc-meta-row">
-                    <span class="doc-meta-label">Web Docs</span>
-                    <span>@stats.WebDocumentCount</span>
                 </div>
             </div>
         }
@@ -290,12 +274,8 @@
             DbFileSize = FormatSize(fileSize),
             SopFileCategoryCount = await db.SopCategories.CountAsync(),
             SopFileCount = await db.SopFiles.CountAsync(),
-            WebSopCategoryCount = await db.Categories.CountAsync(),
-            WebSopDocumentCount = await db.Documents.CountAsync(),
             DocCategoryCount = await db.DocumentCategories.CountAsync(),
-            OfficeDocumentCount = await db.OfficeDocuments.CountAsync(),
-            WebDocCategoryCount = await db.WebDocCategories.CountAsync(),
-            WebDocumentCount = await db.WebDocuments.CountAsync()
+            OfficeDocumentCount = await db.OfficeDocuments.CountAsync()
         };
     }
 
@@ -394,7 +374,7 @@
                 if (seeded)
                 {
                     await LoadStats();
-                    demoMessage = "Demo data loaded successfully! Browse SOPs, Documents, and Web Docs to see the sample content.";
+                    demoMessage = "Demo data loaded successfully! Browse SOPs and Documents to see the sample content.";
                     demoSuccess = true;
                 }
                 else
@@ -428,11 +408,7 @@
         public string DbFileSize { get; set; } = "";
         public int SopFileCategoryCount { get; set; }
         public int SopFileCount { get; set; }
-        public int WebSopCategoryCount { get; set; }
-        public int WebSopDocumentCount { get; set; }
         public int DocCategoryCount { get; set; }
         public int OfficeDocumentCount { get; set; }
-        public int WebDocCategoryCount { get; set; }
-        public int WebDocumentCount { get; set; }
     }
 }

@@ -2,6 +2,7 @@
 @using DecoSOP.Services
 @using DecoSOP.Models
 @inject SopFileService SopFileService
+@inject DocumentService DocumentService
 @inject UserPreferenceService Prefs
 @inject DataCacheService Cache
 @inject ContextMenuState MenuState
@@ -57,40 +58,6 @@
             </div>
         }
 
-        @if (webSopFavCats.Count > 0 || webSopFavDocs.Count > 0)
-        {
-            <div class="favorites-section">
-                <h2>Web SOPs</h2>
-                <div class="category-grid">
-                    @foreach (var cat in webSopFavCats)
-                    {
-                        <div class="category-card @(GetColor(webSopCatPrefs, cat.Id) is string c ? $"card-color-{c}" : "")"
-                             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, cat.Id, cat.Name, true, IsPinned(webSopCatPrefs, cat.Id), GetColor(webSopCatPrefs, cat.Id), CategoryType.WebSop)"
-                             @oncontextmenu:preventDefault="true">
-                            <h3>
-                                <FolderIcon Color="@GetColor(webSopCatPrefs, cat.Id)" /><a href="websops/category/@cat.Id" class="category-heading-link">@cat.Name</a>
-                                <button class="btn-star starred" title="Remove from favorites"
-                                        @onclick="() => ToggleWebSopCategoryFavorite(cat)">&#9733;</button>
-                            </h3>
-                        </div>
-                    }
-                    @foreach (var doc in webSopFavDocs)
-                    {
-                        <div class="category-card category-card-doc"
-                             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, doc.Id, doc.Title, true, false, null, CategoryType.WebSop, ItemKind.Document)"
-                             @oncontextmenu:preventDefault="true">
-                            <h3>
-                                <a href="websops/@doc.Id" class="category-heading-link">@doc.Title</a>
-                                <button class="btn-star starred" title="Remove from favorites"
-                                        @onclick="() => ToggleWebSopDocFavorite(doc)">&#9733;</button>
-                            </h3>
-                            <span class="text-muted small">@doc.Category.Name</span>
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-
         @if (docFavCats.Count > 0 || docFavDocs.Count > 0)
         {
             <div class="favorites-section">
@@ -125,41 +92,6 @@
                 </div>
             </div>
         }
-
-        @if (webDocFavCats.Count > 0 || webDocFavDocs.Count > 0)
-        {
-            <div class="favorites-section">
-                <h2>Web Docs</h2>
-                <div class="category-grid">
-                    @foreach (var cat in webDocFavCats)
-                    {
-                        <div class="category-card @(GetColor(webDocCatPrefs, cat.Id) is string c ? $"card-color-{c}" : "")"
-                             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, cat.Id, cat.Name, true, IsPinned(webDocCatPrefs, cat.Id), GetColor(webDocCatPrefs, cat.Id), CategoryType.WebDoc)"
-                             @oncontextmenu:preventDefault="true">
-                            <h3>
-                                <FolderIcon Color="@GetColor(webDocCatPrefs, cat.Id)" /><a href="webdocs/category/@cat.Id" class="category-heading-link">@cat.Name</a>
-                                <button class="btn-star starred" title="Remove from favorites"
-                                        @onclick="() => ToggleWebDocCategoryFavorite(cat)">&#9733;</button>
-                            </h3>
-                        </div>
-                    }
-                    @foreach (var doc in webDocFavDocs)
-                    {
-                        <div class="category-card category-card-doc"
-                             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, doc.Id, doc.Title, true, false, null, CategoryType.WebDoc, ItemKind.Document)"
-                             @oncontextmenu:preventDefault="true">
-                            <h3>
-                                <a href="webdocs/@doc.Id" class="category-heading-link">@doc.Title</a>
-                                <span class="file-type-badge badge-wdoc">WDoc</span>
-                                <button class="btn-star starred" title="Remove from favorites"
-                                        @onclick="() => ToggleWebDocDocFavorite(doc)">&#9733;</button>
-                            </h3>
-                            <span class="text-muted small">@doc.Category.Name</span>
-                        </div>
-                    }
-                </div>
-            </div>
-        }
     }
 </div>
 
@@ -168,21 +100,13 @@
     private bool loaded;
     private List<SopCategory> sopFavCats = [];
     private List<SopFile> sopFavDocs = [];
-    private List<Category> webSopFavCats = [];
-    private List<SopDocument> webSopFavDocs = [];
     private List<DocumentCategory> docFavCats = [];
     private List<OfficeDocument> docFavDocs = [];
-    private List<WebDocCategory> webDocFavCats = [];
-    private List<WebDocument> webDocFavDocs = [];
     private bool hasFavorites => sopFavCats.Count > 0 || sopFavDocs.Count > 0
-                              || webSopFavCats.Count > 0 || webSopFavDocs.Count > 0
-                              || docFavCats.Count > 0 || docFavDocs.Count > 0
-                              || webDocFavCats.Count > 0 || webDocFavDocs.Count > 0;
+                              || docFavCats.Count > 0 || docFavDocs.Count > 0;
 
     private Dictionary<int, UserPreference> sopCatPrefs = new();
-    private Dictionary<int, UserPreference> webSopCatPrefs = new();
     private Dictionary<int, UserPreference> docCatPrefs = new();
-    private Dictionary<int, UserPreference> webDocCatPrefs = new();
 
     private static bool IsPinned(Dictionary<int, UserPreference> prefs, int id) => prefs.TryGetValue(id, out var p) && p.IsPinned;
     private static string? GetColor(Dictionary<int, UserPreference> prefs, int id) => prefs.TryGetValue(id, out var p) ? p.Color : null;
@@ -208,16 +132,10 @@
             {
                 sopFavCats = await Cache.GetSopFavoriteCategoriesAsync();
                 sopFavDocs = await Cache.GetSopFavoriteDocumentsAsync();
-                webSopFavCats = await Cache.GetWebSopFavoriteCategoriesAsync();
-                webSopFavDocs = await Cache.GetWebSopFavoriteDocumentsAsync();
                 docFavCats = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavDocs = await Cache.GetDocFavoriteDocumentsAsync();
-                webDocFavCats = await Cache.GetWebDocFavoriteCategoriesAsync();
-                webDocFavDocs = await Cache.GetWebDocFavoriteDocumentsAsync();
                 sopCatPrefs = await Cache.GetSopCategoryPrefsAsync();
-                webSopCatPrefs = await Cache.GetWebSopCategoryPrefsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                webDocCatPrefs = await Cache.GetWebDocCategoryPrefsAsync();
                 loaded = true;
             }, _cts.Token);
             StateHasChanged();
@@ -234,16 +152,10 @@
             {
                 sopFavCats = await Cache.GetSopFavoriteCategoriesAsync();
                 sopFavDocs = await Cache.GetSopFavoriteDocumentsAsync();
-                webSopFavCats = await Cache.GetWebSopFavoriteCategoriesAsync();
-                webSopFavDocs = await Cache.GetWebSopFavoriteDocumentsAsync();
                 docFavCats = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavDocs = await Cache.GetDocFavoriteDocumentsAsync();
-                webDocFavCats = await Cache.GetWebDocFavoriteCategoriesAsync();
-                webDocFavDocs = await Cache.GetWebDocFavoriteDocumentsAsync();
                 sopCatPrefs = await Cache.GetSopCategoryPrefsAsync();
-                webSopCatPrefs = await Cache.GetWebSopCategoryPrefsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                webDocCatPrefs = await Cache.GetWebDocCategoryPrefsAsync();
                 loaded = true;
             }, _cts.Token);
             await InvokeAsync(StateHasChanged);
@@ -277,23 +189,6 @@
         sopFavDocs = await Cache.GetSopFavoriteDocumentsAsync();
     }
 
-    private async Task ToggleWebSopCategoryFavorite(Category cat)
-    {
-        await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(Category), cat.Id));
-        Cache.InvalidateWebSopFavorites();
-        webSopFavCats = await Cache.GetWebSopFavoriteCategoriesAsync();
-        webSopFavDocs = await Cache.GetWebSopFavoriteDocumentsAsync();
-        webSopCatPrefs = await Cache.GetWebSopCategoryPrefsAsync();
-    }
-
-    private async Task ToggleWebSopDocFavorite(SopDocument doc)
-    {
-        await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(SopDocument), doc.Id));
-        Cache.InvalidateWebSopFavorites();
-        webSopFavCats = await Cache.GetWebSopFavoriteCategoriesAsync();
-        webSopFavDocs = await Cache.GetWebSopFavoriteDocumentsAsync();
-    }
-
     private async Task ToggleDocCategoryFavorite(DocumentCategory cat)
     {
         await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(DocumentCategory), cat.Id));
@@ -309,22 +204,5 @@
         Cache.InvalidateDocFavorites();
         docFavCats = await Cache.GetDocFavoriteCategoriesAsync();
         docFavDocs = await Cache.GetDocFavoriteDocumentsAsync();
-    }
-
-    private async Task ToggleWebDocCategoryFavorite(WebDocCategory cat)
-    {
-        await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(WebDocCategory), cat.Id));
-        Cache.InvalidateWebDocFavorites();
-        webDocFavCats = await Cache.GetWebDocFavoriteCategoriesAsync();
-        webDocFavDocs = await Cache.GetWebDocFavoriteDocumentsAsync();
-        webDocCatPrefs = await Cache.GetWebDocCategoryPrefsAsync();
-    }
-
-    private async Task ToggleWebDocDocFavorite(WebDocument doc)
-    {
-        await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(WebDocument), doc.Id));
-        Cache.InvalidateWebDocFavorites();
-        webDocFavCats = await Cache.GetWebDocFavoriteCategoriesAsync();
-        webDocFavDocs = await Cache.GetWebDocFavoriteDocumentsAsync();
     }
 }

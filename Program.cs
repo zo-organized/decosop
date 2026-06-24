@@ -44,10 +44,8 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientIdentityService>();
 builder.Services.AddScoped<UserPreferenceService>();
-builder.Services.AddScoped<WebSopService>();
 builder.Services.AddScoped<SopFileService>();
 builder.Services.AddScoped<DocumentService>();
-builder.Services.AddScoped<WebDocService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
 builder.Services.AddSingleton<UpdateService>();
@@ -63,33 +61,60 @@ using (var scope = app.Services.CreateScope())
     // Schema migrations for existing databases (EnsureCreated only creates new DBs)
     var conn = db.Database.GetDbConnection();
     await conn.OpenAsync();
+
+    // One-time removal of the legacy Web SOPs / Web Docs modules: back up the DB,
+    // drop their tables, clean orphaned preferences, and reclaim space. Gated by a
+    // sentinel file so it runs exactly once. (Runs after EnsureCreated, which no
+    // longer includes these tables in the model so won't recreate them.)
+    var webRemovalSentinel = Path.Combine(dataDir, "webmodules-removed.flag");
+    if (!File.Exists(webRemovalSentinel))
+    {
+        try
+        {
+            if (File.Exists(dbPath))
+            {
+                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                foreach (var suffix in new[] { "", "-wal", "-shm" })
+                {
+                    var src = dbPath + suffix;
+                    if (File.Exists(src))
+                        File.Copy(src, $"{dbPath}.bak-{stamp}{suffix}", overwrite: true);
+                }
+            }
+
+            using (var drop = conn.CreateCommand())
+            {
+                drop.CommandText = """
+                    DROP TABLE IF EXISTS WebDocuments;
+                    DROP TABLE IF EXISTS WebDocCategories;
+                    DROP TABLE IF EXISTS Documents;
+                    DROP TABLE IF EXISTS Categories;
+                    DELETE FROM UserPreferences
+                        WHERE EntityType IN ('Category','SopDocument','WebDocCategory','WebDocument');
+                    """;
+                await drop.ExecuteNonQueryAsync();
+            }
+            using (var vacuum = conn.CreateCommand())
+            {
+                vacuum.CommandText = "VACUUM";
+                await vacuum.ExecuteNonQueryAsync();
+            }
+
+            await File.WriteAllTextAsync(webRemovalSentinel, $"Removed {DateTime.Now:O}");
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Migration");
+            logger.LogError(ex, "Web module removal/cleanup failed.");
+        }
+    }
+
     try
     {
       try
       {
-        // Add IsFavorited columns if missing
-        foreach (var table in new[] { "Categories", "Documents" })
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"PRAGMA table_info('{table}')";
-            var hasColumn = false;
-            using (var reader = await cmd.ExecuteReaderAsync())
-            {
-                while (await reader.ReadAsync())
-                {
-                    if (reader.GetString(1) == "IsFavorited") { hasColumn = true; break; }
-                }
-            }
-            if (!hasColumn)
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = $"ALTER TABLE {table} ADD COLUMN IsFavorited INTEGER NOT NULL DEFAULT 0";
-                await alter.ExecuteNonQueryAsync();
-            }
-        }
-
         // Add Color and IsPinned columns if missing
-        foreach (var table in new[] { "Categories", "DocumentCategories", "WebDocCategories" })
+        foreach (var table in new[] { "DocumentCategories" })
         {
             using var pragmaCmd = conn.CreateCommand();
             pragmaCmd.CommandText = $"PRAGMA table_info('{table}')";
@@ -154,42 +179,6 @@ using (var scope = app.Services.CreateScope())
                 """;
             await create.ExecuteNonQueryAsync();
         }
-        // Create WebDocCategories and WebDocuments tables if missing
-        using var checkWebDoc = conn.CreateCommand();
-        checkWebDoc.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='WebDocCategories'";
-        var webDocExists = await checkWebDoc.ExecuteScalarAsync();
-        if (webDocExists is null)
-        {
-            using var create = conn.CreateCommand();
-            create.CommandText = """
-                CREATE TABLE WebDocCategories (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Name TEXT NOT NULL DEFAULT '',
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    IsPinned INTEGER NOT NULL DEFAULT 0,
-                    Color TEXT,
-                    ParentId INTEGER,
-                    FOREIGN KEY (ParentId) REFERENCES WebDocCategories(Id) ON DELETE RESTRICT
-                );
-                CREATE UNIQUE INDEX IX_WebDocCategories_ParentId_Name ON WebDocCategories(ParentId, Name);
-
-                CREATE TABLE WebDocuments (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Title TEXT NOT NULL DEFAULT '',
-                    HtmlContent TEXT NOT NULL DEFAULT '',
-                    CategoryId INTEGER NOT NULL,
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    UpdatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    FOREIGN KEY (CategoryId) REFERENCES WebDocCategories(Id) ON DELETE CASCADE
-                );
-                CREATE UNIQUE INDEX IX_WebDocuments_CategoryId_Title ON WebDocuments(CategoryId, Title);
-                """;
-            await create.ExecuteNonQueryAsync();
-        }
-
         // Create SopCategories and SopFiles tables if missing
         using var checkSopCat = conn.CreateCommand();
         checkSopCat.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='SopCategories'";
@@ -256,14 +245,10 @@ using (var scope = app.Services.CreateScope())
             // Migrate existing favorites/pins/colors from entity tables to UserPreferences
             var migrations = new[]
             {
-                ("Categories", "Category", true),
                 ("SopCategories", "SopCategory", true),
                 ("DocumentCategories", "DocumentCategory", true),
-                ("WebDocCategories", "WebDocCategory", true),
-                ("Documents", "SopDocument", false),
                 ("SopFiles", "SopFile", false),
                 ("OfficeDocuments", "OfficeDocument", false),
-                ("WebDocuments", "WebDocument", false),
             };
 
             foreach (var (table, entityType, hasPinColor) in migrations)
@@ -289,70 +274,6 @@ using (var scope = app.Services.CreateScope())
             }
         }
 
-        // Seed WebDocCategories from DocumentCategories (full tree)
-        // Re-seeds if category count doesn't match (handles partial initial seed)
-        {
-            using var countWeb = conn.CreateCommand();
-            countWeb.CommandText = "SELECT COUNT(*) FROM WebDocCategories";
-            var webCount = Convert.ToInt32(await countWeb.ExecuteScalarAsync());
-
-            using var countDoc = conn.CreateCommand();
-            countDoc.CommandText = "SELECT COUNT(*) FROM DocumentCategories";
-            var docCount = Convert.ToInt32(await countDoc.ExecuteScalarAsync());
-
-            if (webCount != docCount && docCount > 0)
-            {
-                // Clear partial seed (safe because WebDocuments cascade-deletes)
-                using var clear = conn.CreateCommand();
-                clear.CommandText = "DELETE FROM WebDocuments; DELETE FROM WebDocCategories;";
-                await clear.ExecuteNonQueryAsync();
-
-                // Read all DocumentCategories
-                var docCats = new List<(int Id, string Name, int SortOrder, int? ParentId)>();
-                using var readCmd = conn.CreateCommand();
-                readCmd.CommandText = "SELECT Id, Name, SortOrder, ParentId FROM DocumentCategories";
-                using (var reader = await readCmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        docCats.Add((
-                            reader.GetInt32(0),
-                            reader.GetString(1),
-                            reader.GetInt32(2),
-                            reader.IsDBNull(3) ? null : reader.GetInt32(3)
-                        ));
-                    }
-                }
-
-                // Insert level by level: roots first, then children, mapping old IDs to new IDs
-                var idMap = new Dictionary<int, int>(); // oldDocCatId → newWebDocCatId
-                var remaining = new List<(int Id, string Name, int SortOrder, int? ParentId)>(docCats);
-
-                while (remaining.Count > 0)
-                {
-                    var batch = remaining
-                        .Where(c => c.ParentId is null || idMap.ContainsKey(c.ParentId.Value))
-                        .ToList();
-
-                    if (batch.Count == 0) break; // avoid infinite loop on orphans
-
-                    foreach (var cat in batch)
-                    {
-                        int? newParentId = cat.ParentId.HasValue ? idMap[cat.ParentId.Value] : null;
-                        using var ins = conn.CreateCommand();
-                        ins.CommandText = "INSERT INTO WebDocCategories (Name, SortOrder, IsFavorited, IsPinned, Color, ParentId) VALUES (@n, @s, 0, 0, NULL, @p); SELECT last_insert_rowid();";
-                        ins.Parameters.Add(new Microsoft.Data.Sqlite.SqliteParameter("@n", cat.Name));
-                        ins.Parameters.Add(new Microsoft.Data.Sqlite.SqliteParameter("@s", cat.SortOrder));
-                        ins.Parameters.Add(new Microsoft.Data.Sqlite.SqliteParameter("@p", (object?)newParentId ?? DBNull.Value));
-                        var newId = Convert.ToInt32(await ins.ExecuteScalarAsync());
-                        idMap[cat.Id] = newId;
-                    }
-
-                    foreach (var cat in batch)
-                        remaining.Remove(cat);
-                }
-            }
-        }
     }
       catch (Exception ex)
       {
@@ -365,30 +286,12 @@ using (var scope = app.Services.CreateScope())
         await conn.CloseAsync();
     }
 
-    // Seed demo data if requested via --seed-demo flag
+    // Seed demo data if requested via --seed-demo flag, then exit (don't start the web server)
     if (args.Contains("--seed-demo"))
+    {
         await DemoDataService.SeedDemoDataAsync(db);
-
-    // Import files from directory if requested via CLI flags
-    var importSopsIdx = Array.IndexOf(args, "--import-sops");
-    if (importSopsIdx >= 0 && importSopsIdx + 1 < args.Length)
-    {
-        var sopSourceDir = args[importSopsIdx + 1];
-        var sopUploadsDir = Path.Combine(dataDir, "sop-uploads");
-        FileImportService.ImportSopFiles(dbPath, sopSourceDir, sopUploadsDir);
-    }
-
-    var importDocsIdx = Array.IndexOf(args, "--import-docs");
-    if (importDocsIdx >= 0 && importDocsIdx + 1 < args.Length)
-    {
-        var docSourceDir = args[importDocsIdx + 1];
-        var docUploadsDir = Path.Combine(dataDir, "doc-uploads");
-        FileImportService.ImportDocumentFiles(dbPath, docSourceDir, docUploadsDir);
-    }
-
-    // Exit after CLI operations (don't start the web server)
-    if (args.Contains("--seed-demo") || importSopsIdx >= 0 || importDocsIdx >= 0)
         return;
+    }
 
     // Ensure uploads directories exist
     DocumentService.GetUploadDirectory();
