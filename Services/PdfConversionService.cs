@@ -219,6 +219,9 @@ public static class PdfConversionService
 
     public static bool IsLibreOfficeAvailable() => FindSoffice() is not null;
 
+    /// <summary>Resolved path to soffice.exe, or null if LibreOffice isn't installed.</summary>
+    internal static string? GetSofficePath() => FindSoffice();
+
     private static string GetPreviewDirectory()
     {
         var dir = Path.Combine(DocumentService.DataDirectory, "doc-uploads", "previews");

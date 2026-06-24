@@ -136,6 +136,31 @@ public class WebDocService
         await _db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Returns a title unique within the category, appending " (2)", " (3)", ...
+    /// if the desired title is already taken (the table has a unique CategoryId+Title index).
+    /// </summary>
+    public async Task<string> GetUniqueTitleAsync(int categoryId, string desiredTitle)
+    {
+        var baseTitle = desiredTitle.Trim();
+        if (baseTitle.Length > 200) baseTitle = baseTitle[..200];
+
+        var existing = (await _db.WebDocuments
+            .Where(d => d.CategoryId == categoryId)
+            .Select(d => d.Title)
+            .ToListAsync())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!existing.Contains(baseTitle)) return baseTitle;
+
+        for (int i = 2; i < 1000; i++)
+        {
+            var candidate = $"{baseTitle} ({i})";
+            if (!existing.Contains(candidate)) return candidate;
+        }
+        return $"{baseTitle} ({Guid.NewGuid():N})";
+    }
+
     public async Task DeleteDocumentAsync(int id)
     {
         var doc = await _db.WebDocuments.FindAsync(id);

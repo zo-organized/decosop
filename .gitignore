@@ -64,6 +64,7 @@ installer-output/
 ## Document uploads
 uploads/
 sop-uploads/
+doc-uploads/
 
 ## Python
 __pycache__/

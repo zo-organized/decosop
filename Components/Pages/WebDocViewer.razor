@@ -5,6 +5,7 @@
 @inject UserPreferenceService Prefs
 @inject DataCacheService Cache
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>@(document?.Title ?? "Web Doc") - DecoSOP</PageTitle>
 
@@ -15,6 +16,11 @@
 else
 {
     <div class="sop-viewer">
+        <div class="print-only print-header">
+            <h1>@document.Title</h1>
+            <div class="print-meta">@categoryPath</div>
+        </div>
+
         <div class="sop-toolbar">
             <span class="sop-breadcrumb">@categoryPath / @document.Title</span>
             <button class="btn-star btn-star-lg @(isFavorited ? "starred" : "")"
@@ -23,6 +29,7 @@ else
                 @(isFavorited ? "\u2605" : "\u2606")
             </button>
             <div class="sop-actions">
+                <button class="btn btn-sm btn-outline-secondary" @onclick="PrintDocument">Print</button>
                 <button class="btn btn-sm btn-outline-primary" @onclick="Edit">Edit</button>
                 <button class="btn btn-sm btn-outline-danger" @onclick="ConfirmDelete">Delete</button>
             </div>
@@ -72,6 +79,8 @@ else
         isFavorited = await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(WebDocument), document.Id));
         Cache.InvalidateWebDocFavorites();
     }
+
+    private async Task PrintDocument() => await JS.InvokeVoidAsync("print");
 
     private void Edit() => Nav.NavigateTo($"/webdocs/{Id}/edit");
 

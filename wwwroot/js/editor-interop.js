@@ -27,19 +27,22 @@ window.editorInterop = {
             showWordsCounter: false,
             showXPathInStatusbar: false,
             buttons: [
-                'bold', 'italic', 'underline', 'strikethrough', '|',
+                'paragraph', '|',
+                'bold', 'italic', 'underline', 'strikethrough', 'superscript', 'subscript', '|',
                 'ul', 'ol', '|',
                 'font', 'fontsize', 'brush', '|',
                 'align', 'indent', 'outdent', '|',
-                'table', '|',
-                'link', 'hr', '|',
+                'image', 'table', 'link', 'hr', 'symbols', '|',
+                'copyformat', 'eraser', '|',
                 'undo', 'redo', '|',
-                'eraser', 'fullsize'
+                'source', 'fullsize'
             ],
             placeholder: 'Start writing your SOP here...',
+            // Preserve formatting when pasting (especially from Word) instead of stripping it.
             askBeforePasteHTML: false,
             askBeforePasteFromWord: false,
-            defaultActionOnPaste: 'insert_clear_html'
+            defaultActionOnPaste: 'insert_as_html',
+            defaultActionOnPasteFromWord: 'insert_as_html'
         });
 
         if (initialHtml) {

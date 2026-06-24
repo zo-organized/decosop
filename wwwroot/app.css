@@ -130,21 +130,24 @@ h1:focus {
 
 .category-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 1rem;
+    /* Wider min track = bigger cards. auto-fill still adds columns as the
+       viewport grows; min(...,100%) keeps cards from overflowing narrow screens. */
+    grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+    gap: 0.75rem;
 }
 
 .category-card {
     background: #f8f9fa;
     border: 1px solid #dee2e6;
     border-radius: 8px;
-    padding: 1.25rem;
+    padding: 1rem;
     transition: background 0.3s ease;
 }
 
 .category-card h3 {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.25rem;
     font-size: 1.1rem;
     margin-bottom: 0.75rem;
@@ -944,11 +947,17 @@ h1:focus {
    Print Stylesheet
    ============================================ */
 
+/* Print-only elements are hidden on screen, revealed when printing */
+.print-only {
+    display: none;
+}
+
 @media print {
     .sidebar,
     .sidebar-resizer,
     .mode-toggle,
     .top-row,
+    .sop-toolbar,
     .sop-actions,
     .btn-star,
     .btn-star-lg,
@@ -976,10 +985,28 @@ h1:focus {
         max-width: none;
     }
 
-    .sop-toolbar {
-        border-bottom: none;
-        padding-bottom: 0;
-        margin-bottom: 0.5rem;
+    @page {
+        margin: 1.5cm;
+    }
+
+    /* Printed document header (title + category), hidden on screen */
+    .print-only {
+        display: block;
+    }
+
+    .print-header h1 {
+        font-size: 18pt;
+        margin: 0 0 0.15rem;
+        padding: 0;
+        border: none;
+    }
+
+    .print-header .print-meta {
+        font-size: 10pt;
+        color: #555;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #ccc;
     }
 
     .sop-content {
@@ -988,6 +1015,35 @@ h1:focus {
 
     .sop-footer {
         font-size: 9pt;
+    }
+
+    /* Keep backgrounds (table headers, blockquotes) when printing */
+    .sop-content th,
+    .sop-content blockquote {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* Avoid awkward page breaks */
+    .sop-content h1,
+    .sop-content h2,
+    .sop-content h3 {
+        break-after: avoid;
+        page-break-after: avoid;
+    }
+
+    .sop-content table,
+    .sop-content tr,
+    .sop-content img,
+    .sop-content blockquote {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    /* Never let images overflow the printed page */
+    .sop-content img {
+        max-width: 100% !important;
+        height: auto !important;
     }
 
     a {
