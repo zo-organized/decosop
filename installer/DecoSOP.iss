@@ -56,6 +56,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 ; Published app files — excludes DB and upload dirs (user data)
 Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,doc-uploads,sop-uploads"
+; Document-sync setup script (SharePoint/OneDrive via rclone, or a local folder/share)
+Source: "Configure-DecoSOP-Sync.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\doc-uploads"
@@ -63,6 +65,7 @@ Name: "{app}\sop-uploads"
 
 [Icons]
 Name: "{group}\DecoSOP"; Filename: "http://localhost:{code:GetPort}"
+Name: "{group}\Configure Document Sync"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Configure-DecoSOP-Sync.ps1"" -AppDir ""{app}"""; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall DecoSOP"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\DecoSOP"; Filename: "http://localhost:{code:GetPort}"; Tasks: desktopicon
 
@@ -107,6 +110,9 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--seed-demo"; Flags: runhidden w
 
 ; Start the service
 Filename: "sc.exe"; Parameters: "start DecoSOP"; Flags: runhidden waituntilterminated; StatusMsg: "Starting DecoSOP..."
+
+; Offer to configure document sync now (SharePoint/OneDrive via rclone, or a local folder/share)
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Configure-DecoSOP-Sync.ps1"" -AppDir ""{app}"""; Flags: postinstall shellexec nowait; Description: "Configure document sync (SharePoint / OneDrive or a folder) now"
 
 ; Open browser
 Filename: "http://localhost:{code:GetPort}"; Flags: postinstall shellexec nowait unchecked; Description: "Open DecoSOP in browser"
@@ -504,7 +510,6 @@ begin
   DatabasePage.Add('Empty database (start fresh — add your own content)');
   DatabasePage.Add('Demo database (sample SOPs and documents to explore the app)');
   DatabasePage.Add('Import a database backup (.db file from a previous installation)');
-  DatabasePage.Add('Import from file directories (scan folders and create categories)');
   DatabasePage.SelectedValueIndex := 0;
 
   // Page 3: Import file picker (after database — only shown if Import selected)
@@ -879,13 +884,6 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    // Run scan imports with progress polling
-    if ShouldScanSops then
-      RunImportWithProgress('--import-sops "' + GetScanSopDirPath('') + '"', 'Scanning and importing SOP files...');
-
-    if ShouldScanDocs then
-      RunImportWithProgress('--import-docs "' + GetScanDocDirPath('') + '"', 'Scanning and importing document files...');
-
     // Download and install LibreOffice if selected
     if ShouldInstallLibreOffice then
     begin
