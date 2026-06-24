@@ -11,6 +11,10 @@ public class DocumentService
     private static readonly long MaxFileSize = 50 * 1024 * 1024; // 50 MB
     public static string DataDirectory { get; set; } = AppContext.BaseDirectory;
 
+    /// <summary>When set to an existing directory, files are read/written in place here
+    /// (e.g. a OneDrive-synced folder or network share) instead of the local doc-uploads dir.</summary>
+    public static string? SyncRoot { get; set; }
+
     public DocumentService(AppDbContext db) => _db = db;
 
     private static void ValidateName(string? name, string field = "Name")
@@ -25,6 +29,8 @@ public class DocumentService
 
     public static string GetUploadDirectory()
     {
+        if (!string.IsNullOrWhiteSpace(SyncRoot) && Directory.Exists(SyncRoot))
+            return SyncRoot;
         var dir = Path.Combine(DataDirectory, "doc-uploads");
         Directory.CreateDirectory(dir);
         return dir;
@@ -160,6 +166,34 @@ public class DocumentService
         }
 
         return doc;
+    }
+
+    /// <summary>
+    /// Overwrite an existing file's bytes in place (same stored path) with an uploaded
+    /// replacement, so a OneDrive-synced/shared folder propagates it as an update rather
+    /// than a new file. Replacement must be the same file type.
+    /// </summary>
+    public async Task ReplaceFileAsync(int id, IBrowserFile file)
+    {
+        var doc = await _db.OfficeDocuments.FindAsync(id);
+        if (doc is null) return;
+
+        if (!string.Equals(Path.GetExtension(file.Name), Path.GetExtension(doc.FileName), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"Replacement must be the same file type ({GetFileExtension(doc.FileName)}).");
+
+        var path = GetFilePath(doc);
+        // Write to a temp sibling then atomically swap, so a sync client never sees a half-written file.
+        var tmp = path + ".uploadtmp";
+        await using (var s = file.OpenReadStream(MaxFileSize))
+        await using (var fs = new FileStream(tmp, FileMode.Create))
+        {
+            await s.CopyToAsync(fs);
+        }
+        File.Move(tmp, path, overwrite: true);
+
+        doc.FileSize = file.Size;
+        doc.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
     }
 
     public async Task DeleteDocumentAsync(int id)

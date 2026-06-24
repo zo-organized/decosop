@@ -1,6 +1,6 @@
 namespace DecoSOP.Models;
 
-public class SopCategory
+public class SopCategory : ICategoryNode
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;

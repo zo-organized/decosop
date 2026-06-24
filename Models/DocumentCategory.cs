@@ -1,6 +1,6 @@
 namespace DecoSOP.Models;
 
-public class DocumentCategory
+public class DocumentCategory : ICategoryNode
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;

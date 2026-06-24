@@ -1,6 +1,6 @@
 namespace DecoSOP.Models;
 
-public class SopFile
+public class SopFile : IFileNode
 {
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;

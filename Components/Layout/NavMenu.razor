@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
+@inject SyncNotificationService SyncNotify
 @implements IDisposable
 
 <div class="top-row ps-3 navbar navbar-dark">
@@ -336,6 +337,16 @@
         Nav.LocationChanged += OnLocationChanged;
         MenuState.OnCategoryModified += OnCategoryModified;
         MenuState.OnChange += StateHasChanged;
+        SyncNotify.OnReconciled += OnReconciled;
+    }
+
+    // Fired (off the circuit's thread) when the background folder sync changes data.
+    // Reuse the existing category-modified refresh path so the sidebar and all open pages update.
+    private async Task OnReconciled(SyncScope scope)
+    {
+        try { await MenuState.NotifyCategoryModified(); }
+        catch (ObjectDisposedException) { }
+        catch (OperationCanceledException) { }
     }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
@@ -410,6 +421,7 @@
         Nav.LocationChanged -= OnLocationChanged;
         MenuState.OnCategoryModified -= OnCategoryModified;
         MenuState.OnChange -= StateHasChanged;
+        SyncNotify.OnReconciled -= OnReconciled;
     }
 
     private void SwitchMode(string mode)

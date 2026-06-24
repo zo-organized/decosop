@@ -36,6 +36,16 @@ var dataDir = builder.Environment.IsDevelopment()
 var dbPath = Path.Combine(dataDir, "decosop.db");
 DocumentService.DataDirectory = dataDir;
 SopFileService.DataDirectory = dataDir;
+
+// Folder-sync: point each module at its watched folder (OneDrive-synced / network share / local).
+builder.Services.Configure<FolderSyncOptions>(builder.Configuration.GetSection("FolderSync"));
+var folderSync = builder.Configuration.GetSection("FolderSync").Get<FolderSyncOptions>() ?? new FolderSyncOptions();
+if (folderSync.Enabled)
+{
+    if (!string.IsNullOrWhiteSpace(folderSync.Sop.Root)) SopFileService.SyncRoot = folderSync.Sop.Root;
+    if (!string.IsNullOrWhiteSpace(folderSync.Doc.Root)) DocumentService.SyncRoot = folderSync.Doc.Root;
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
@@ -49,6 +59,8 @@ builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
 builder.Services.AddSingleton<UpdateService>();
+builder.Services.AddSingleton<SyncNotificationService>();
+builder.Services.AddHostedService<FolderSyncBackgroundService>();
 
 var app = builder.Build();
 

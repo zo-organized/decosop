@@ -1,6 +1,6 @@
 namespace DecoSOP.Models;
 
-public class OfficeDocument
+public class OfficeDocument : IFileNode
 {
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
