@@ -62,6 +62,61 @@ Sync settings live in `appsettings.json` (or `appsettings.Production.json`) next
 
 **Network share note:** point the roots at the UNC/mapped path and ensure the service account can read it. Back up the folder yourself — it's the single source of truth.
 
+## Keeping documents synced to the server
+
+DecoSOP only ever indexes a **folder** — it has no SharePoint/OneDrive connector of its own. So "syncing from the cloud" means: something mirrors your OneDrive/SharePoint library down to a local folder, and DecoSOP watches that folder. This section covers how to set that up.
+
+### Where to run DecoSOP
+
+Run it on a **small always-on PC or a lightweight VM** — **not** on a Hyper-V host or domain controller. The app is tiny (Blazor + SQLite), but the machine choice matters because of how the documents get there (below).
+
+### Which sync method to use
+
+Pick based on one question: **can that machine stay logged in?**
+
+| | Machine can stay logged in | Machine must run headless (no login) |
+|---|---|---|
+| **Method** | OneDrive desktop client | rclone (SYSTEM scheduled task) |
+| **Admin consent needed?** | No | Yes, once |
+| **Survives reboot unattended?** | Only if it auto-logs-in | Yes |
+
+Both are offered by the **`Configure-DecoSOP-Sync`** tool (Start-menu shortcut / end of installer). If you already share one Microsoft 365 account across the office via OneDrive, the DecoSOP machine is just "one more office PC," and either method uses that same account.
+
+#### Method A — OneDrive desktop client (simplest, for a machine that stays logged in)
+
+1. Install the **OneDrive** app and sign in with the account whose OneDrive holds the documents (e.g. the shared office account).
+2. Use **"Choose folders"** (selective sync) to sync **only** the SOP and Document folders — not the whole OneDrive.
+3. Right-click those folders → **"Always keep on this device."** Indexing works on cloud-only placeholders, but **downloads and previews need the real files present**.
+4. Run `Configure-DecoSOP-Sync` → **Local folder / network share**, and point the SOP and Doc roots at the synced local paths (e.g. `C:\Users\<user>\OneDrive - <Org>\...\SOPs`).
+
+**Caveat:** the OneDrive client only syncs **while a user is signed in**. Disconnect RDP (leaves the session running) rather than signing out. If the machine reboots with nobody logged in, syncing pauses until someone logs in.
+
+#### Method B — rclone, headless (for a machine that must run with no login)
+
+rclone syncs the library under the SYSTEM account, so no one needs to stay logged in and it survives reboots. It needs **one-time Entra (Azure AD) admin consent**, because most tenants require an administrator to approve third-party apps.
+
+**Important — two different accounts are involved:**
+- The **file-owning account** (e.g. `admin@decodental.com`) is what rclone **signs into and syncs** — it does **not** need to be an org admin.
+- A **Global Administrator** account grants the **one-time app approval**. If the file-owning account isn't an org admin, it will hit a **"Need admin approval"** wall — that's expected.
+
+**Do it in this order** (so the sync token ends up tied to the file-owning account, not the admin):
+
+1. **As a Global Administrator**, pre-approve rclone once:
+   - **entra.microsoft.com → Identity → Applications → Enterprise applications → rclone → Security → Permissions → "Grant admin consent for &lt;org&gt;"**.
+   - (rclone appears here once someone has attempted the sign-in and hit the approval wall.)
+2. **Then** run `Configure-DecoSOP-Sync` → **SharePoint / OneDrive (rclone)**. When rclone's browser sign-in opens, log in as the **file-owning account** (`admin@decodental.com`) — it now goes straight through.
+3. Answer the remaining prompts: the remote paths (e.g. `remote:!  Admin@deco FILES/z PROTOCOLS`), the local folder to sync into, the sync interval, and the SharePoint/OneDrive web URLs for the **Open in Office** buttons (optional).
+
+The tool then writes `appsettings.Production.json`, creates the **"DecoSOP Document Sync"** SYSTEM scheduled task (removed automatically on uninstall), and restarts the service.
+
+**Alternative to step 1** (approve during the flow instead of pre-approving): at the "Need admin approval" screen, click **"Have an admin account? Sign in with that account,"** sign in as the Global Admin, and tick **"Consent on behalf of your organization."** Pre-approving first (step 1) is cleaner because it keeps the admin identity out of the sign-in that mints the sync token.
+
+### Notes for both methods
+
+- **Sync only the SOP/Doc folders**, not the entire OneDrive — the rest is usually large and irrelevant.
+- Content should be **non-sensitive** — DecoSOP has no login and is reachable by anyone on the LAN.
+- If the folder is OneDrive **Files On-Demand**, remember previews/downloads need the bytes present (**"Always keep on this device"**); rclone copies real files so this doesn't apply to Method B.
+
 ## Accessing the app
 
 - **On the host:** `http://localhost:<port>` (default `5098`)
