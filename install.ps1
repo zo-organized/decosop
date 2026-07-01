@@ -50,6 +50,14 @@ if (!(Test-Path $dbDest) -and (Test-Path $dbSource)) {
 
 Write-Host "  Files copied." -ForegroundColor Green
 
+# --- Port configuration ---
+# The app reads its listening port from port.config at startup (defaults to 5098).
+# Only write it when a port was explicitly requested, so upgrades keep the current port.
+if ($PSBoundParameters.ContainsKey('Port')) {
+    "PORT=$Port" | Set-Content -Path (Join-Path $InstallDir "port.config") -Encoding ASCII
+    Write-Host "  Listening port set to $Port." -ForegroundColor Green
+}
+
 # --- Create Windows Service ---
 if (!$existingService) {
     Write-Host "Creating Windows service..." -ForegroundColor White
@@ -96,6 +104,15 @@ Write-Host "  Access DecoSOP at:" -ForegroundColor White
 Write-Host "    This machine:  http://localhost:$Port" -ForegroundColor Yellow
 if ($ip) {
     Write-Host "    Other machines: http://${ip}:$Port" -ForegroundColor Yellow
+}
+Write-Host ""
+Write-Host "  Next step - point DecoSOP at your document folders:" -ForegroundColor White
+$syncScript = Join-Path $InstallDir "Configure-DecoSOP-Sync.ps1"
+if (Test-Path $syncScript) {
+    Write-Host "    Run as Administrator:  $syncScript" -ForegroundColor Yellow
+    Write-Host "    (SharePoint/OneDrive via rclone, or a local folder/share)" -ForegroundColor Gray
+} else {
+    Write-Host "    Set the FolderSync roots in $InstallDir\appsettings.json" -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "  The service starts automatically on boot." -ForegroundColor Gray

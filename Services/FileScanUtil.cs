@@ -1,37 +1,17 @@
-using System.Text.RegularExpressions;
-
 namespace DecoSOP.Services;
 
 /// <summary>
-/// Shared helpers for scanning a folder tree into category/file structure:
-/// recursive enumeration with skip rules, folder/title name cleaning, and
-/// content-type mapping. Used by the folder reconciler.
+/// Shared helpers for scanning a folder tree into category/file structure: recursive
+/// enumeration (a 1:1 mirror — no folder or extension filtering), name/title derivation
+/// (folder names are used verbatim), and content-type mapping. Used by the folder reconciler.
 /// </summary>
 public static class FileScanUtil
 {
-    private static readonly string[] SkipPatterns =
-    [
-        @"^zz\s*archive$",
-        @"^z\s*archive$",
-        @"^x\s*old$",
-        @"^z\s*old\b",
-        @"^poss\s*older\b",
-        @"^!+\s*.*to\s+go\s+thru",
-        @"to\s+go\s+thru",
-        @"^archive$"
-    ];
-
-    public static readonly HashSet<string> IncludeExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".txt", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".zip",
-        ".rtf", ".odt", ".ods"
-    };
-
     /// <summary>
-    /// Recursively enumerate importable files under baseDir, returning each file's
-    /// relative path (forward slashes) and absolute path. Skips ~$ lock files,
-    /// archive folders, and non-included extensions. Reads metadata only.
+    /// Recursively enumerate every file under baseDir, returning each file's relative path
+    /// (forward slashes) and absolute path. No folder or extension filtering — the index is
+    /// a 1:1 mirror of the folder. Only ~$ Office lock files (transient, not real content)
+    /// are skipped. Reads metadata only.
     /// </summary>
     public static IEnumerable<(string RelPath, string FullPath)> WalkFiles(string baseDir)
     {
@@ -49,9 +29,7 @@ public static class FileScanUtil
         foreach (var file in files.OrderBy(f => f.Name))
         {
             if (file.Name.StartsWith("~$"))
-                continue;
-            if (!IncludeExtensions.Contains(file.Extension))
-                continue;
+                continue; // transient Office lock file (not real content; OneDrive doesn't sync these)
             var relPath = Path.GetRelativePath(basePath, file.FullName);
             yield return (relPath, file.FullName);
         }
@@ -62,8 +40,6 @@ public static class FileScanUtil
 
         foreach (var subdir in subdirs.OrderBy(d => d.Name))
         {
-            if (ShouldSkipDir(subdir.Name))
-                continue;
             foreach (var item in WalkDirectory(subdir, basePath))
                 yield return item;
         }
@@ -71,7 +47,8 @@ public static class FileScanUtil
 
     /// <summary>
     /// Recursively enumerate non-skipped subdirectories under baseDir, returning each
-    /// as a list of cleaned name segments (the category chain) from the root.
+    /// as a list of name segments (the category chain) from the root. Folder names are
+    /// used verbatim so categories match the real folders exactly.
     /// </summary>
     public static IEnumerable<IReadOnlyList<string>> WalkDirectoryChains(string baseDir)
     {
@@ -87,48 +64,23 @@ public static class FileScanUtil
 
         foreach (var subdir in subdirs.OrderBy(d => d.Name))
         {
-            if (ShouldSkipDir(subdir.Name))
-                continue;
-            var chain = new List<string>(prefix) { CleanDirName(subdir.Name) };
+            var chain = new List<string>(prefix) { subdir.Name };
             yield return chain;
             foreach (var nested in WalkChains(subdir, chain))
                 yield return nested;
         }
     }
 
-    public static bool ShouldSkipDir(string dirname)
-    {
-        foreach (var pattern in SkipPatterns)
-            if (Regex.IsMatch(dirname, pattern, RegexOptions.IgnoreCase))
-                return true;
-        return false;
-    }
+    /// <summary>File title = the file name without its extension, verbatim (the extension shows as a badge).</summary>
+    public static string CleanTitle(string filename) => Path.GetFileNameWithoutExtension(filename);
 
-    public static string CleanDirName(string dirname)
-    {
-        var name = dirname;
-        name = Regex.Replace(name, @"^[~!^@]+\s*", "");
-        name = Regex.Replace(name, @"^\d+\s+", "");
-        name = Regex.Replace(name, @"\s+", " ").Trim();
-        return string.IsNullOrEmpty(name) ? dirname : name;
-    }
-
-    public static string CleanTitle(string filename)
-    {
-        var name = Path.GetFileNameWithoutExtension(filename);
-        name = Regex.Replace(name, @"^[~!^]+\s*", "");
-        name = name.Replace('_', ' ');
-        name = Regex.Replace(name, @"\s+", " ").Trim();
-        return string.IsNullOrEmpty(name) ? filename : name;
-    }
-
-    /// <summary>Compute the cleaned category-name chain for a file's relative path (excludes the filename).</summary>
+    /// <summary>The category-name chain for a file's relative path (folder names verbatim; excludes the filename).</summary>
     public static IReadOnlyList<string> CategoryChainForRelPath(string relPath)
     {
         var parts = relPath.Replace('\\', '/').Split('/');
         if (parts.Length <= 1)
             return ["General"];
-        return parts[..^1].Select(CleanDirName).ToList();
+        return parts[..^1].ToList();
     }
 
     public static string GetContentType(string filename)

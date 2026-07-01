@@ -22,6 +22,15 @@ public class FolderSyncBackgroundService : BackgroundService
     private FileSystemWatcher? _docWatcher;
     private Timer? _sopDebounce;
     private Timer? _docDebounce;
+    private CancellationToken _stopping;
+
+    /// <summary>Whether folder sync is enabled in configuration.</summary>
+    public bool Enabled => _opts.Enabled;
+
+    /// <summary>UTC time of the most recent completed reconcile pass (either module), or null if none yet.</summary>
+    public DateTime? LastSyncUtc { get; private set; }
+    public FolderReconciler.Result LastSopResult { get; private set; }
+    public FolderReconciler.Result LastDocResult { get; private set; }
 
     public FolderSyncBackgroundService(IServiceScopeFactory scopeFactory,
         IOptions<FolderSyncOptions> opts, SyncNotificationService notify,
@@ -35,6 +44,7 @@ public class FolderSyncBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stopping = stoppingToken;
         if (!_opts.Enabled) return;
 
         var sopRoot = _opts.Sop.Root;
@@ -68,6 +78,14 @@ public class FolderSyncBackgroundService : BackgroundService
             }
         }
         catch (OperationCanceledException) { }
+    }
+
+    /// <summary>Run an immediate reconcile of both configured modules (used by the Settings "Sync now" button).</summary>
+    public async Task SyncNowAsync()
+    {
+        if (!_opts.Enabled) return;
+        if (HasRoot(_opts.Sop.Root)) await RunSopAsync(_stopping);
+        if (HasRoot(_opts.Doc.Root)) await RunDocAsync(_stopping);
     }
 
     private static bool HasRoot(string? root) => !string.IsNullOrWhiteSpace(root) && Directory.Exists(root);
@@ -114,6 +132,8 @@ public class FolderSyncBackgroundService : BackgroundService
             using var scopeSvc = _scopeFactory.CreateScope();
             var db = scopeSvc.ServiceProvider.GetRequiredService<AppDbContext>();
             var result = await reconcile(db, root!, ct);
+            if (scope == SyncScope.Sop) LastSopResult = result; else LastDocResult = result;
+            LastSyncUtc = DateTime.UtcNow;
             if (result.Changed)
             {
                 _logger.LogInformation("Folder sync ({Scope}): +{Added} ~{Updated} -{Removed}",

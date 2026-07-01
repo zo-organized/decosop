@@ -75,3 +75,6 @@ __pycache__/
 CLAUDE.md
 .claude/
 RELEASE_CONTEXT.md
+
+# Playwright MCP test artifacts
+.playwright-mcp/

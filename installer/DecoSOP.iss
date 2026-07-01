@@ -6,21 +6,21 @@
 ;   2. License Agreement
 ;   3. Install Directory
 ;   4. Port Configuration
-;   5. Database Setup (Empty / Demo / Import backup / Scan folders)
-;   6. Import Database file      (only if Import selected)
-;   7. Import SOP files dir      (only if Import selected, optional)
-;   8. Import Documents dir      (only if Import selected, optional)
-;   9. Scan SOP source dir       (only if Scan selected)
-;  10. Scan Documents source dir (only if Scan selected)
-;  11. Auto-Update Preference (checks, auto-install, time picker)
-;  12. LibreOffice (optional download + install for Office doc previews)
-;  13. Shortcuts (desktop icon)
-;  14. Ready to Install
-;  15. Installing...
-;  16. Finish (open in browser)
+;   5. Database Setup (Empty index / Import backup)
+;   6. Import Database file        (only if Import selected)
+;   7. Import SOP uploads dir       (only if Import selected, optional — legacy uploads)
+;   8. Import Documents uploads dir (only if Import selected, optional — legacy uploads)
+;   9. Auto-Update Preference (checks, auto-install, time picker)
+;  10. LibreOffice (optional download + install for Office doc previews)
+;  11. Shortcuts (desktop icon)
+;  12. Ready to Install / Installing / Finish (open in browser)
+;
+; After install, setup offers to run Configure-DecoSOP-Sync to point DecoSOP at the
+; folders it should index (SharePoint/OneDrive via rclone, or a local folder/share).
+; The category/file index is rebuilt from those folders automatically on startup.
 
 #define MyAppName "DecoSOP"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/Susguine/decosop"
 #define MyAppExeName "DecoSOP.exe"
@@ -103,11 +103,6 @@ Filename: "robocopy.exe"; Parameters: """{code:GetImportDocDirPath}"" ""{app}\do
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DecoSOP"""; Flags: runhidden; StatusMsg: "Updating firewall rules..."
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""DecoSOP"" dir=in action=allow protocol=TCP localport={code:GetPort}"; Flags: runhidden waituntilterminated
 
-; Seed demo data if selected
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--seed-demo"; Flags: runhidden waituntilterminated; StatusMsg: "Loading demo data..."; Check: ShouldSeedDemo
-
-; NOTE: SOP/Doc scan imports are now handled in CurStepChanged with progress polling
-
 ; Start the service
 Filename: "sc.exe"; Parameters: "start DecoSOP"; Flags: runhidden waituntilterminated; StatusMsg: "Starting DecoSOP..."
 
@@ -118,10 +113,12 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "http://localhost:{code:GetPort}"; Flags: postinstall shellexec nowait unchecked; Description: "Open DecoSOP in browser"
 
 [UninstallRun]
-Filename: "sc.exe"; Parameters: "stop DecoSOP"; Flags: runhidden waituntilterminated
-Filename: "cmd.exe"; Parameters: "/c timeout /t 5 /nobreak >nul"; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "delete DecoSOP"; Flags: runhidden waituntilterminated
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DecoSOP"""; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "stop DecoSOP"; Flags: runhidden waituntilterminated; RunOnceId: "StopSvc"
+Filename: "cmd.exe"; Parameters: "/c timeout /t 5 /nobreak >nul"; Flags: runhidden waituntilterminated; RunOnceId: "WaitSvc"
+Filename: "sc.exe"; Parameters: "delete DecoSOP"; Flags: runhidden waituntilterminated; RunOnceId: "DelSvc"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DecoSOP"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw"
+; Remove the document-sync scheduled task created by Configure-DecoSOP-Sync (leaves synced folders untouched)
+Filename: "schtasks.exe"; Parameters: "/Delete /TN ""DecoSOP Document Sync"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "DelSyncTask"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\wwwroot"
@@ -139,9 +136,6 @@ var
   ImportSopDirEdit: TNewEdit;
   ImportDocDirPage: TWizardPage;
   ImportDocDirEdit: TNewEdit;
-  ScanSopDirPage: TInputDirWizardPage;
-  ScanDocDirPage: TWizardPage;
-  ScanDocDirEdit: TNewEdit;
   UpdatePage: TWizardPage;
   UpdateEnableRadio: TNewRadioButton;
   UpdateDisableRadio: TNewRadioButton;
@@ -178,18 +172,10 @@ end;
 
 // ---- Database helpers ----
 
-function ShouldSeedDemo: Boolean;
-begin
-  if DatabasePage <> nil then
-    Result := DatabasePage.SelectedValueIndex = 1
-  else
-    Result := False;
-end;
-
 function ShouldImportDb: Boolean;
 begin
   if DatabasePage <> nil then
-    Result := DatabasePage.SelectedValueIndex = 2
+    Result := DatabasePage.SelectedValueIndex = 1
   else
     Result := False;
 end;
@@ -228,42 +214,6 @@ end;
 function ShouldImportDocDir: Boolean;
 begin
   Result := ShouldImportDb and (GetImportDocDirPath('') <> '') and DirExists(GetImportDocDirPath(''));
-end;
-
-// ---- Scan directory helpers ----
-
-function ShouldScanFiles: Boolean;
-begin
-  if DatabasePage <> nil then
-    Result := DatabasePage.SelectedValueIndex = 3
-  else
-    Result := False;
-end;
-
-function GetScanSopDirPath(Param: String): String;
-begin
-  if ScanSopDirPage <> nil then
-    Result := ScanSopDirPage.Values[0]
-  else
-    Result := '';
-end;
-
-function ShouldScanSops: Boolean;
-begin
-  Result := ShouldScanFiles and (GetScanSopDirPath('') <> '') and DirExists(GetScanSopDirPath(''));
-end;
-
-function GetScanDocDirPath(Param: String): String;
-begin
-  if ScanDocDirEdit <> nil then
-    Result := ScanDocDirEdit.Text
-  else
-    Result := '';
-end;
-
-function ShouldScanDocs: Boolean;
-begin
-  Result := ShouldScanFiles and (GetScanDocDirPath('') <> '') and DirExists(GetScanDocDirPath(''));
 end;
 
 // ---- Update helpers ----
@@ -449,15 +399,6 @@ begin
     ImportDocDirEdit.Text := Dir;
 end;
 
-procedure BrowseScanDocDir(Sender: TObject);
-var
-  Dir: String;
-begin
-  Dir := ScanDocDirEdit.Text;
-  if BrowseForFolder('Select the Document source folder:', Dir, False) then
-    ScanDocDirEdit.Text := Dir;
-end;
-
 // ---- Update page event handlers ----
 
 procedure UpdateRadioClick(Sender: TObject);
@@ -503,13 +444,13 @@ begin
   DatabasePage := CreateInputOptionPage(
     PortPage.ID,
     'Database Setup',
-    'Choose how to initialize the database.',
-    'DecoSOP stores all SOPs, documents, and categories in a local database.' + #13#10 +
-    'Select how you would like to start:',
+    'Choose how to initialize the index database.',
+    'DecoSOP indexes your synced folder into a local database. Categories and files' + #13#10 +
+    'are rebuilt from that folder automatically; this database also holds each' + #13#10 +
+    'machine''s favorites, pins, and colors. Choose how to start:',
     True, False);
-  DatabasePage.Add('Empty database (start fresh — add your own content)');
-  DatabasePage.Add('Demo database (sample SOPs and documents to explore the app)');
-  DatabasePage.Add('Import a database backup (.db file from a previous installation)');
+  DatabasePage.Add('Empty (recommended) — content is indexed from your synced folder');
+  DatabasePage.Add('Import a database backup (.db) — restores favorites, pins, and colors');
   DatabasePage.SelectedValueIndex := 0;
 
   // Page 3: Import file picker (after database — only shown if Import selected)
@@ -609,66 +550,9 @@ begin
     OnClick := @BrowseImportDocDir;
   end;
 
-  // Page 6: Scan SOP source dir (after import dirs — only shown if Scan selected)
-  ScanSopDirPage := CreateInputDirPage(
-    ImportDocDirPage.ID,
-    'Scan SOP Files',
-    'Select a folder containing your SOP files.',
-    'DecoSOP will scan the selected folder and its subfolders.' + #13#10 +
-    'Subfolders become categories, and matching files (PDF, Word, Excel, etc.)' + #13#10 +
-    'are imported as SOPs.' + #13#10 + #13#10 +
-    'Archive and temporary folders are automatically skipped.',
-    False, '');
-  ScanSopDirPage.Add('SOP source folder (e.g. S:\SOPs):');
-  ScanSopDirPage.Values[0] := '';
-
-  // Page 7: Scan Documents source dir (after scan SOP — only shown if Scan selected)
-  ScanDocDirPage := CreateCustomPage(
-    ScanSopDirPage.ID,
-    'Scan Document Files',
-    'Optionally select a folder containing your document files.');
-  with TNewStaticText.Create(ScanDocDirPage) do
-  begin
-    Parent := ScanDocDirPage.Surface;
-    Caption := 'DecoSOP will scan the selected folder and its subfolders.' + #13#10 +
-               'Subfolders become categories, and matching files are imported as Documents.' + #13#10 + #13#10 +
-               'Leave blank to skip document scanning.';
-    Left := 0;
-    Top := 0;
-    Width := ScanDocDirPage.SurfaceWidth;
-    WordWrap := True;
-    AutoSize := True;
-  end;
-  with TNewStaticText.Create(ScanDocDirPage) do
-  begin
-    Parent := ScanDocDirPage.Surface;
-    Caption := 'Document source folder (e.g. S:\Documents):';
-    Left := 0;
-    Top := 76;
-  end;
-  ScanDocDirEdit := TNewEdit.Create(ScanDocDirPage);
-  with ScanDocDirEdit do
-  begin
-    Parent := ScanDocDirPage.Surface;
-    Left := 0;
-    Top := 96;
-    Width := ScanDocDirPage.SurfaceWidth - 90;
-    Text := '';
-  end;
-  with TNewButton.Create(ScanDocDirPage) do
-  begin
-    Parent := ScanDocDirPage.Surface;
-    Caption := 'Browse...';
-    Left := ScanDocDirPage.SurfaceWidth - 85;
-    Top := 94;
-    Width := 85;
-    Height := 25;
-    OnClick := @BrowseScanDocDir;
-  end;
-
-  // Page 8: Auto-update preference (after scan dirs)
+  // Page 6: Auto-update preference (after import dirs)
   UpdatePage := CreateCustomPage(
-    ScanDocDirPage.ID,
+    ImportDocDirPage.ID,
     'Automatic Updates',
     'Choose whether DecoSOP should check for updates.');
 
@@ -833,48 +717,7 @@ begin
   end;
 end;
 
-// ---- Import with real-time progress polling ----
-
-procedure RunImportWithProgress(ExeParams, InitialMsg: String);
-var
-  StatusFile: String;
-  StatusText: AnsiString;
-  ResultCode: Integer;
-  ElapsedMs: Integer;
-begin
-  StatusFile := ExpandConstant('{app}\import-status.txt');
-  DeleteFile(StatusFile);
-
-  WizardForm.StatusLabel.Caption := InitialMsg;
-  WizardForm.FilenameLabel.Caption := '';
-  WizardForm.Refresh;
-
-  // Launch import process in background
-  Exec(ExpandConstant('{app}\{#MyAppExeName}'), ExeParams, '', SW_HIDE, ewNoWait, ResultCode);
-
-  // Poll status file until COMPLETE or timeout (60 min)
-  ElapsedMs := 0;
-  while ElapsedMs < 3600000 do
-  begin
-    Sleep(500);
-    ElapsedMs := ElapsedMs + 500;
-
-    if LoadStringFromFile(StatusFile, StatusText) then
-    begin
-      if Pos('COMPLETE', String(StatusText)) > 0 then
-        Break;
-      if Length(StatusText) > 0 then
-      begin
-        WizardForm.StatusLabel.Caption := InitialMsg + ' (' + String(StatusText) + ')';
-        WizardForm.Refresh;
-      end;
-    end;
-  end;
-
-  DeleteFile(StatusFile);
-end;
-
-// ---- Post-install: imports + LibreOffice ----
+// ---- Post-install: LibreOffice ----
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -937,10 +780,6 @@ begin
       Result := True;
     if (ImportDocDirPage <> nil) and (PageID = ImportDocDirPage.ID) then
       Result := True;
-    if (ScanSopDirPage <> nil) and (PageID = ScanSopDirPage.ID) then
-      Result := True;
-    if (ScanDocDirPage <> nil) and (PageID = ScanDocDirPage.ID) then
-      Result := True;
     Exit;
   end;
 
@@ -953,13 +792,6 @@ begin
 
   if (ImportDocDirPage <> nil) and (PageID = ImportDocDirPage.ID) then
     Result := not ShouldImportDb;
-
-  // Skip scan directory pages unless "Import from file directories" is selected
-  if (ScanSopDirPage <> nil) and (PageID = ScanSopDirPage.ID) then
-    Result := not ShouldScanFiles;
-
-  if (ScanDocDirPage <> nil) and (PageID = ScanDocDirPage.ID) then
-    Result := not ShouldScanFiles;
 
   // Skip LibreOffice page if already installed
   if (LibreOfficePage <> nil) and (PageID = LibreOfficePage.ID) then
@@ -1025,45 +857,6 @@ begin
     begin
       MsgBox('The selected folder does not exist. Please choose a valid directory or leave blank to skip.', mbError, MB_OK);
       Result := False;
-    end;
-  end;
-
-  // Validate scan SOP directory (required when scan option selected)
-  if (ScanSopDirPage <> nil) and (CurPageID = ScanSopDirPage.ID) then
-  begin
-    if (ScanSopDirPage.Values[0] = '') then
-    begin
-      MsgBox('Please select a folder containing your SOP files to scan.', mbError, MB_OK);
-      Result := False;
-    end
-    else if not DirExists(ScanSopDirPage.Values[0]) then
-    begin
-      MsgBox('The selected folder does not exist. Please choose a valid directory.', mbError, MB_OK);
-      Result := False;
-    end;
-  end;
-
-  // Validate optional scan doc dir (non-empty must exist, must not overlap with SOP dir)
-  if (ScanDocDirPage <> nil) and (CurPageID = ScanDocDirPage.ID) then
-  begin
-    if (ScanDocDirEdit.Text <> '') then
-    begin
-      if not DirExists(ScanDocDirEdit.Text) then
-      begin
-        MsgBox('The selected folder does not exist. Please choose a valid directory or leave blank to skip.', mbError, MB_OK);
-        Result := False;
-      end
-      else if (CompareText(ScanDocDirEdit.Text, GetScanSopDirPath('')) = 0) then
-      begin
-        MsgBox('The Document folder cannot be the same as the SOP folder. Please choose a different directory or leave blank to skip.', mbError, MB_OK);
-        Result := False;
-      end
-      else if (CompareText(Copy(ScanDocDirEdit.Text, 1, Length(GetScanSopDirPath(''))), GetScanSopDirPath('')) = 0) or
-              (CompareText(Copy(GetScanSopDirPath(''), 1, Length(ScanDocDirEdit.Text)), ScanDocDirEdit.Text) = 0) then
-      begin
-        MsgBox('The Document folder overlaps with the SOP folder (one is inside the other). Please choose a non-overlapping directory or leave blank to skip.', mbError, MB_OK);
-        Result := False;
-      end;
     end;
   end;
 end;

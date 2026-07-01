@@ -80,7 +80,7 @@ public static class FolderReconciler
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-        // Resolve (creating if needed) the leaf category Id for a chain of cleaned names.
+        // Resolve (creating if needed) the leaf category Id for a chain of folder names.
         async Task<int> EnsureChainAsync(IReadOnlyList<string> chain)
         {
             int? parentId = null;
@@ -105,7 +105,7 @@ public static class FolderReconciler
         var newOnDisk = disk.Where(d => !fileByStored.ContainsKey(d.StoredName)).ToList();
 
         // --- 4. Move/rename heuristic: a vanished file + exactly one new file with the same
-        //         size and cleaned title is treated as a move (preserve Id + preferences). ---
+        //         size and title is treated as a move (preserve Id + preferences). ---
         var movedNew = new HashSet<string>(StringComparer.Ordinal);
         foreach (var gone in vanished.ToList())
         {
@@ -130,11 +130,28 @@ public static class FolderReconciler
         }
         newOnDisk = newOnDisk.Where(d => !movedNew.Contains(d.StoredName)).ToList();
 
-        // --- 5. Update matched files in place (metadata only; keep Id, StoredFileName, Title) ---
+        // --- 5. Update matched files in place (keep Id, StoredFileName, Title). Re-home to the
+        //         disk-derived category so the folder stays authoritative — this auto-migrates when
+        //         the naming scheme changes. Skip a re-home that would collide with an existing
+        //         title in the target (unique CategoryId+Title). ---
         foreach (var d in disk)
         {
             if (!fileByStored.TryGetValue(d.StoredName, out var row)) continue;
             bool changed = false;
+
+            var catId = await EnsureChainAsync(d.Chain);
+            if (row.CategoryId != catId)
+            {
+                var targetTitles = usedTitles.TryGetValue(catId, out var ts) ? ts : usedTitles[catId] = new(StringComparer.OrdinalIgnoreCase);
+                if (!targetTitles.Contains(row.Title))
+                {
+                    if (usedTitles.TryGetValue(row.CategoryId, out var oldSet)) oldSet.Remove(row.Title);
+                    targetTitles.Add(row.Title);
+                    row.CategoryId = catId;
+                    changed = true;
+                }
+            }
+
             if (row.FileSize != d.Size) { row.FileSize = d.Size; changed = true; }
             if (row.ContentType != d.ContentType) { row.ContentType = d.ContentType; changed = true; }
             if (changed) { row.UpdatedAt = d.Mtime; updated++; }
@@ -209,7 +226,7 @@ public static class FolderReconciler
         var cats = await db.Set<TCat>().ToListAsync(ct);
         var catById = cats.ToDictionary(c => c.Id);
 
-        // Folder chains that exist on disk ("a/b/c" of cleaned names).
+        // Folder chains that exist on disk ("a/b/c" of folder names).
         var diskChains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var chain in FileScanUtil.WalkDirectoryChains(root))
             diskChains.Add(string.Join("/", chain));

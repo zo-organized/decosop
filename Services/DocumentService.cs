@@ -57,10 +57,17 @@ public class DocumentService
     public async Task<DocumentCategory> CreateCategoryAsync(string name, int? parentId = null)
     {
         ValidateName(name, "Category name");
+        name = name.Trim();
         var maxSort = await _db.DocumentCategories
             .Where(c => c.ParentId == parentId)
             .MaxAsync(c => (int?)c.SortOrder) ?? -1;
-        var category = new DocumentCategory { Name = name.Trim(), SortOrder = maxSort + 1, ParentId = parentId };
+
+        // Create the real folder first (the folder is the source of truth); the DB row mirrors it.
+        var chain = parentId is null ? new List<string>() : await GetNameChainAsync(parentId.Value);
+        chain.Add(name);
+        Directory.CreateDirectory(DiskPathForChain(chain));
+
+        var category = new DocumentCategory { Name = name, SortOrder = maxSort + 1, ParentId = parentId };
         _db.DocumentCategories.Add(category);
         await _db.SaveChangesAsync();
         return category;
@@ -69,18 +76,91 @@ public class DocumentService
     public async Task RenameCategoryAsync(int id, string newName)
     {
         ValidateName(newName, "Category name");
+        newName = newName.Trim();
         var cat = await _db.DocumentCategories.FindAsync(id);
-        if (cat is null) return;
-        cat.Name = newName.Trim();
+        if (cat is null || cat.Name == newName) return;
+
+        var oldChain = await GetNameChainAsync(id);
+        if (IsSyntheticGeneral(oldChain))
+            throw new InvalidOperationException("The General category is managed automatically and can't be renamed.");
+
+        var newChain = oldChain.ToList();
+        newChain[^1] = newName;
+
+        // Rename the real folder, then repoint descendant files' stored relative paths.
+        var oldPath = DiskPathForChain(oldChain);
+        var newPath = DiskPathForChain(newChain);
+        if (Directory.Exists(oldPath) && !PathsEqual(oldPath, newPath))
+        {
+            if (Directory.Exists(newPath))
+                throw new InvalidOperationException($"A folder named \"{newName}\" already exists here.");
+            Directory.Move(oldPath, newPath);
+        }
+
+        var oldPrefix = RelPathForChain(oldChain) + "/";
+        var newPrefix = RelPathForChain(newChain) + "/";
+        if (oldPrefix != newPrefix)
+        {
+            var affected = await _db.OfficeDocuments.Where(f => f.StoredFileName.StartsWith(oldPrefix)).ToListAsync();
+            foreach (var f in affected)
+                f.StoredFileName = newPrefix + f.StoredFileName.Substring(oldPrefix.Length);
+        }
+
+        cat.Name = newName;
         await _db.SaveChangesAsync();
     }
 
-    public async Task DeleteCategoryAsync(int id)
+    // Categories and files are never deleted from within the app: deletion happens by removing
+    // the file/folder on disk (in OneDrive / the watched folder), which the reconciler then
+    // mirrors into the DB. This keeps the folder the single source of truth.
+
+    // --- Disk-path helpers (a category's Name is its real folder name) ---
+
+    private async Task<List<string>> GetNameChainAsync(int categoryId)
     {
-        var cat = await _db.DocumentCategories.FindAsync(id);
-        if (cat is null) return;
-        _db.DocumentCategories.Remove(cat);
-        await _db.SaveChangesAsync();
+        var all = await _db.DocumentCategories.AsNoTracking().ToListAsync();
+        var parts = new List<string>();
+        var current = all.FirstOrDefault(c => c.Id == categoryId);
+        while (current is not null)
+        {
+            parts.Insert(0, current.Name);
+            current = current.ParentId.HasValue ? all.FirstOrDefault(c => c.Id == current.ParentId) : null;
+        }
+        return parts;
+    }
+
+    /// <summary>The synthetic root "General" bucket (root-level files) has no real folder of its own.</summary>
+    private static bool IsSyntheticGeneral(IReadOnlyList<string> chain)
+        => chain.Count == 1 && chain[0] == "General";
+
+    /// <summary>Relative path (forward slashes) of a category folder from the root; empty for the synthetic root "General".</summary>
+    private static string RelPathForChain(IReadOnlyList<string> chain)
+        => IsSyntheticGeneral(chain) ? "" : string.Join("/", chain);
+
+    private static string DiskPathForChain(IReadOnlyList<string> chain)
+    {
+        var root = GetUploadDirectory();
+        var rel = RelPathForChain(chain);
+        return rel.Length == 0 ? root : Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private static bool PathsEqual(string a, string b)
+        => string.Equals(
+            Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static (string Path, string Name) UniqueFilePath(string dir, string fileName)
+    {
+        if (!File.Exists(Path.Combine(dir, fileName))) return (Path.Combine(dir, fileName), fileName);
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var ext = Path.GetExtension(fileName);
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{stem} ({i}){ext}";
+            var p = Path.Combine(dir, candidate);
+            if (!File.Exists(p)) return (p, candidate);
+        }
     }
 
     public async Task<string> GetCategoryPathAsync(int categoryId)
@@ -133,24 +213,30 @@ public class DocumentService
             .Where(d => d.CategoryId == categoryId)
             .MaxAsync(d => (int?)d.SortOrder) ?? -1;
 
-        // Generate a unique stored filename up front (GUID avoids needing the DB-assigned Id)
-        var safeOriginal = string.Join("_", file.Name.Split(Path.GetInvalidFileNameChars()));
-        var storedFileName = $"{Guid.NewGuid():N}_{safeOriginal}";
+        // Write into the category's real folder using the real file name (the folder is the source of truth).
+        var chain = await GetNameChainAsync(categoryId);
+        var dir = DiskPathForChain(chain);
+        Directory.CreateDirectory(dir);
+
+        var safeName = string.Join("_", file.Name.Split(Path.GetInvalidFileNameChars()));
+        var (filePath, finalName) = UniqueFilePath(dir, safeName);
 
         // Copy file to disk FIRST so a file I/O failure doesn't leave an orphaned DB record
-        var filePath = Path.Combine(GetUploadDirectory(), storedFileName);
         await using (var stream = file.OpenReadStream(MaxFileSize))
         await using (var fs = new FileStream(filePath, FileMode.Create))
         {
             await stream.CopyToAsync(fs);
         }
 
+        var rel = RelPathForChain(chain);
+        var storedFileName = (rel.Length == 0 ? "" : rel + "/") + finalName;
+
         var doc = new OfficeDocument
         {
             CategoryId = categoryId,
             Title = title.Trim(),
-            FileName = file.Name,
-            ContentType = file.ContentType,
+            FileName = finalName,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? FileScanUtil.GetContentType(finalName) : file.ContentType,
             FileSize = file.Size,
             SortOrder = maxSort + 1,
             StoredFileName = storedFileName
@@ -196,20 +282,6 @@ public class DocumentService
 
         doc.FileSize = file.Size;
         doc.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-    }
-
-    public async Task DeleteDocumentAsync(int id)
-    {
-        var doc = await _db.OfficeDocuments.FindAsync(id);
-        if (doc is null) return;
-
-        // Delete file from disk
-        var filePath = Path.Combine(GetUploadDirectory(), doc.StoredFileName);
-        if (File.Exists(filePath))
-            File.Delete(filePath);
-
-        _db.OfficeDocuments.Remove(doc);
         await _db.SaveChangesAsync();
     }
 

@@ -57,6 +57,21 @@
     }
     else
     {
+        @if (categories.Count == 0)
+        {
+            <div class="empty-state">
+                @if (DocumentService.SyncRoot is string root)
+                {
+                    <p class="empty-state-title">No documents are indexed yet</p>
+                    <p class="text-muted small">This module is watching <code>@root</code>. Add files or subfolders there and they'll appear automatically — or use <strong>+ New Folder</strong> below.</p>
+                }
+                else
+                {
+                    <p class="empty-state-title">No documents yet</p>
+                    <p class="text-muted small">Use <strong>+ New Folder</strong> below to start organizing, or point DecoSOP at a watched folder (see Settings &rarr; Document Sync).</p>
+                }
+            </div>
+        }
         <div class="category-grid">
             @foreach (var category in categories.OrderByDescending(c => IsCatPinned(c.Id)).ThenBy(c => c.Name))
             {

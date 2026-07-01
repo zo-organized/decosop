@@ -7,12 +7,57 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject UpdateService UpdateService
+@inject Microsoft.Extensions.Options.IOptions<FolderSyncOptions> SyncOptions
+@inject FolderSyncBackgroundService SyncService
 @implements IDisposable
 
 <PageTitle>Settings - DecoSOP</PageTitle>
 
 <div class="settings-container">
     <h1>Settings</h1>
+
+    <div class="settings-section">
+        <h2>Document Sync</h2>
+        <div class="doc-meta">
+            <div class="doc-meta-row">
+                <span class="doc-meta-label">Status</span>
+                <span>@(sync.Enabled ? "Enabled — indexing the folders below" : "Disabled")</span>
+            </div>
+            <div class="doc-meta-row">
+                <span class="doc-meta-label">SOP folder</span>
+                <span>@(string.IsNullOrWhiteSpace(sync.Sop.Root) ? "(not set)" : sync.Sop.Root)</span>
+            </div>
+            <div class="doc-meta-row">
+                <span class="doc-meta-label">Documents folder</span>
+                <span>@(string.IsNullOrWhiteSpace(sync.Doc.Root) ? "(not set)" : sync.Doc.Root)</span>
+            </div>
+            <div class="doc-meta-row">
+                <span class="doc-meta-label">"Open in Office" base</span>
+                <span>@(HasOpenBase ? "Configured (SharePoint / share)" : "Local path (same machine only)")</span>
+            </div>
+            <div class="doc-meta-row">
+                <span class="doc-meta-label">Last synced</span>
+                <span>@LastSyncedText</span>
+            </div>
+        </div>
+        <p class="text-muted small mt-2">
+            These folders are the source of truth — DecoSOP indexes them automatically and reflects
+            edits (Word/Excel, Replace) on their own. Run the "Configure Document Sync" tool on the
+            server to change them.
+        </p>
+        @if (sync.Enabled)
+        {
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <button class="btn btn-sm btn-outline-primary" @onclick="SyncNow" disabled="@isSyncing">
+                    @(isSyncing ? "Syncing..." : "Sync now")
+                </button>
+                @if (!string.IsNullOrEmpty(syncMessage))
+                {
+                    <span class="text-muted small">@syncMessage</span>
+                }
+            </div>
+        }
+    </div>
 
     <div class="settings-section">
         <h2>Database Statistics</h2>
@@ -49,13 +94,13 @@
 
     <div class="settings-section">
         <h2>Database Backup</h2>
-        <p class="text-muted small">Download a copy of the SQLite database file for backup.</p>
+        <p class="text-muted small">Download a copy of the database. Your documents live in the synced folder — this backs up the category index and each user's favorites, pins, and colors.</p>
         <a href="/api/settings/export-db" class="btn btn-sm btn-primary" download="decosop-backup.db">Export Database</a>
     </div>
 
     <div class="settings-section">
         <h2>Database Restore</h2>
-        <p class="text-muted small">Upload a previously exported database file to replace the current database. The application will need to be restarted after import.</p>
+        <p class="text-muted small">Replace the database from a backup (restores favorites, pins, and colors). Categories and documents are re-derived from the synced folder on restart.</p>
 
         @if (!string.IsNullOrEmpty(importMessage))
         {
@@ -73,18 +118,6 @@
                 <span class="text-muted small ms-2">@importFile.Name (@FormatSize(importFile.Size))</span>
             </div>
         }
-    </div>
-
-    <div class="settings-section">
-        <h2>Demo Data</h2>
-        <p class="text-muted small">Populate the database with sample categories and documents to explore the app's features. Only works when the database is empty.</p>
-        @if (!string.IsNullOrEmpty(demoMessage))
-        {
-            <div class="alert @(demoSuccess ? "alert-success" : "alert-warning") mt-2">@demoMessage</div>
-        }
-        <button class="btn btn-sm btn-outline-primary" @onclick="LoadDemoData" disabled="@isLoadingDemo">
-            @(isLoadingDemo ? "Loading..." : "Load Demo Data")
-        </button>
     </div>
 
     <div class="settings-section">
@@ -187,9 +220,6 @@
     private string importMessage = "";
     private bool importSuccess;
     private bool isImporting;
-    private string demoMessage = "";
-    private bool demoSuccess;
-    private bool isLoadingDemo;
 
     // Update settings state
     private bool isChecking;
@@ -201,6 +231,39 @@
 
     private static readonly string appVersion = System.Reflection.Assembly.GetExecutingAssembly()
         .GetName().Version?.ToString(3) ?? "1.0.0";
+
+    private FolderSyncOptions sync => SyncOptions.Value;
+    private bool HasOpenBase => !string.IsNullOrWhiteSpace(sync.Sop.OpenBase) || !string.IsNullOrWhiteSpace(sync.Doc.OpenBase);
+
+    private bool isSyncing;
+    private string? syncMessage;
+
+    private string LastSyncedText => SyncService.LastSyncUtc is DateTime t
+        ? t.ToLocalTime().ToString("g")
+        : "Never";
+
+    private async Task SyncNow()
+    {
+        isSyncing = true;
+        syncMessage = null;
+        StateHasChanged();
+        try
+        {
+            await SyncService.SyncNowAsync();
+            await LoadStats();
+            var sop = SyncService.LastSopResult;
+            var doc = SyncService.LastDocResult;
+            syncMessage = $"Done — SOPs +{sop.Added} ~{sop.Updated} -{sop.Removed}, Docs +{doc.Added} ~{doc.Updated} -{doc.Removed}.";
+        }
+        catch (Exception ex)
+        {
+            syncMessage = $"Sync failed: {ex.Message}";
+        }
+        finally
+        {
+            isSyncing = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -336,63 +399,6 @@
         finally
         {
             isImporting = false;
-        }
-    }
-
-    private async Task LoadDemoData()
-    {
-        isLoadingDemo = true;
-        demoMessage = "";
-        StateHasChanged();
-
-        try
-        {
-            // Run everything on a thread-pool thread to avoid Blazor sync context deadlocks.
-            // Use Task.WhenAny for a reliable timeout that doesn't depend on CancellationToken plumbing.
-            var factory = DbFactory;
-            var work = Task.Run(async () =>
-            {
-                await using var db = await factory.CreateDbContextAsync();
-                return await DecoSOP.Services.DemoDataService.SeedDemoDataAsync(db);
-            });
-            var timeout = Task.Delay(TimeSpan.FromSeconds(30));
-            var finished = await Task.WhenAny(work, timeout);
-
-            if (finished == timeout)
-            {
-                demoMessage = "Demo data loading timed out after 30 seconds. The database may be locked or unavailable.";
-                demoSuccess = false;
-            }
-            else if (work.IsFaulted)
-            {
-                demoMessage = $"Could not load demo data: {work.Exception?.InnerException?.Message ?? work.Exception?.Message}";
-                demoSuccess = false;
-            }
-            else
-            {
-                var seeded = await work;
-                if (seeded)
-                {
-                    await LoadStats();
-                    demoMessage = "Demo data loaded successfully! Browse SOPs and Documents to see the sample content.";
-                    demoSuccess = true;
-                }
-                else
-                {
-                    demoMessage = "Database already contains data. Demo data can only be loaded into an empty database.";
-                    demoSuccess = false;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            demoMessage = $"Could not load demo data: {ex.Message}";
-            demoSuccess = false;
-        }
-        finally
-        {
-            isLoadingDemo = false;
-            StateHasChanged();
         }
     }
 

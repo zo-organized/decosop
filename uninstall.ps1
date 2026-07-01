@@ -42,6 +42,14 @@ if ($existingRule -match "DecoSOP") {
     Write-Host "  Firewall rule not found, skipping." -ForegroundColor Gray
 }
 
+# --- Remove document-sync scheduled task (created by Configure-DecoSOP-Sync) ---
+$taskName = "DecoSOP Document Sync"
+if (schtasks /Query /TN $taskName 2>$null) {
+    Write-Host "Removing document-sync scheduled task..." -ForegroundColor White
+    schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+    Write-Host "  Scheduled task removed (your synced folders are left untouched)." -ForegroundColor Green
+}
+
 # --- Remove files ---
 if (Test-Path $InstallDir) {
     if ($KeepData) {

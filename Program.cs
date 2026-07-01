@@ -62,7 +62,8 @@ builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SyncNotificationService>();
-builder.Services.AddHostedService<FolderSyncBackgroundService>();
+builder.Services.AddSingleton<FolderSyncBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderSyncBackgroundService>());
 
 var app = builder.Build();
 
@@ -300,13 +301,6 @@ using (var scope = app.Services.CreateScope())
         await conn.CloseAsync();
     }
 
-    // Seed demo data if requested via --seed-demo flag, then exit (don't start the web server)
-    if (args.Contains("--seed-demo"))
-    {
-        await DemoDataService.SeedDemoDataAsync(db);
-        return;
-    }
-
     // Ensure uploads directories exist
     DocumentService.GetUploadDirectory();
     SopFileService.GetUploadDirectory();
@@ -374,19 +368,6 @@ app.MapGet("/api/documents/{id:int}/preview", async (int id, AppDbContext db) =>
     return Results.File(filePath, doc.ContentType, enableRangeProcessing: true);
 });
 
-// HTML preview for Office documents (DOCX, XLSX, DOC → converted to HTML)
-app.MapGet("/api/documents/{id:int}/preview-html", async (int id, AppDbContext db) =>
-{
-    var doc = await db.OfficeDocuments.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(DocumentService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    var html = DocumentPreviewService.GenerateHtmlPreview(filePath, doc.Title);
-    return Results.Content(html, "text/html");
-});
-
 // PDF preview for Office documents — converts via LibreOffice on first access, then caches
 app.MapGet("/api/documents/{id:int}/preview-pdf", async (int id, AppDbContext db) =>
 {
@@ -424,18 +405,6 @@ app.MapGet("/api/sops/{id:int}/preview", async (int id, AppDbContext db) =>
     if (filePath is null) return Results.NotFound();
 
     return Results.File(filePath, doc.ContentType, enableRangeProcessing: true);
-});
-
-app.MapGet("/api/sops/{id:int}/preview-html", async (int id, AppDbContext db) =>
-{
-    var doc = await db.SopFiles.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(SopFileService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    var html = DocumentPreviewService.GenerateHtmlPreview(filePath, doc.Title);
-    return Results.Content(html, "text/html");
 });
 
 app.MapGet("/api/sops/{id:int}/preview-pdf", async (int id, AppDbContext db) =>

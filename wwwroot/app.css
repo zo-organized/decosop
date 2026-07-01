@@ -356,92 +356,33 @@ h1:focus {
     flex-direction: column;
 }
 
-.sop-title-input {
-    flex: 1;
-    border: none;
-    border-bottom: 2px solid #dee2e6;
-    border-radius: 0;
-    font-weight: 600;
-    padding-left: 0;
-}
-
-.sop-title-input:focus {
-    border-color: var(--accent);
-    box-shadow: none;
-}
-
-.editor-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    margin-top: 1rem;
-}
-
 /* ============================================
-   SOP rendered content (viewer)
+   Empty state
    ============================================ */
 
-.sop-content {
-    font-size: 0.95rem;
-    line-height: 1.7;
-    color: #333;
-}
-
-.sop-content h1 {
-    font-size: 1.8rem;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 0.3rem;
-    margin-bottom: 1rem;
-}
-
-.sop-content h2 {
-    font-size: 1.4rem;
-    margin-top: 1.5rem;
-    margin-bottom: 0.75rem;
-    color: var(--accent);
-}
-
-.sop-content h3 {
-    font-size: 1.15rem;
-    margin-top: 1.25rem;
-}
-
-.sop-content ul, .sop-content ol {
-    padding-left: 1.5rem;
-}
-
-.sop-content li {
-    margin-bottom: 0.3rem;
-}
-
-.sop-content table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1rem 0;
-}
-
-.sop-content th, .sop-content td {
-    border: 1px solid #dee2e6;
-    padding: 0.5rem 0.75rem;
-    text-align: left;
-}
-
-.sop-content th {
-    background: #f1f3f5;
-    font-weight: 600;
-}
-
-.sop-content blockquote {
-    border-left: 4px solid var(--accent);
-    margin: 1rem 0;
-    padding: 0.5rem 1rem;
+.empty-state {
+    max-width: 640px;
+    margin: 1rem auto 1.5rem;
+    padding: 2rem 1.5rem;
+    text-align: center;
     background: #f8f9fa;
-    color: #555;
+    border: 1px dashed #ced4da;
+    border-radius: 8px;
 }
 
-.sop-content strong {
+.empty-state-title {
+    font-size: 1.1rem;
     font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: #444;
+}
+
+.empty-state code {
+    background: rgba(0,0,0,0.06);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+    word-break: break-all;
 }
 
 /* ============================================
@@ -719,32 +660,6 @@ h1:focus {
 .page:has([data-mode="doc"]) .btn-success:hover {
     background-color: #ad1457;
     border-color: #9c1048;
-}
-
-/* ============================================
-   Web Docs Mode — Teal/Green color scheme
-   ============================================ */
-
-.page:has([data-mode="webdoc"]) {
-    --accent: #00897b;
-    --accent-link: #00796b;
-    --accent-dark: #00796b;
-    --accent-darker: #00695c;
-    --accent-bg: #e0f2f1;
-    --accent-focus: #80cbc4;
-    --sidebar-top: #0d7a6a;
-    --sidebar-bottom: #072420;
-    --sidebar-resizer-color: rgba(0, 137, 123, 0.3);
-}
-
-.page:has([data-mode="webdoc"]) .btn-success {
-    background-color: #00897b;
-    border-color: #00796b;
-}
-
-.page:has([data-mode="webdoc"]) .btn-success:hover {
-    background-color: #00796b;
-    border-color: #00695c;
 }
 
 /* ============================================

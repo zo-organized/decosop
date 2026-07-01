@@ -43,10 +43,6 @@
             <button class="context-menu-item" @onclick="Rename">
                 Rename
             </button>
-            <hr class="context-menu-divider" />
-            <button class="context-menu-item context-menu-item-danger" @onclick="Delete">
-                Delete
-            </button>
         }
     </div>
 }
@@ -143,37 +139,18 @@
                 return;
             }
 
-            if (MenuState.Type == CategoryType.Sop)
-                await Cache.RunExclusiveAsync(() => SopFileService.RenameCategoryAsync(MenuState.CategoryId, newName));
-            else
-                await Cache.RunExclusiveAsync(() => DocService.RenameCategoryAsync(MenuState.CategoryId, newName));
-
-            await MenuState.NotifyCategoryModified();
-        }
-    }
-
-    private async Task Delete()
-    {
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm", $"Delete \"{MenuState.CategoryName}\"? This cannot be undone.");
-
-        MenuState.Hide();
-
-        if (confirmed)
-        {
             try
             {
                 if (MenuState.Type == CategoryType.Sop)
-                    await Cache.RunExclusiveAsync(() => SopFileService.DeleteCategoryAsync(MenuState.CategoryId));
+                    await Cache.RunExclusiveAsync(() => SopFileService.RenameCategoryAsync(MenuState.CategoryId, newName));
                 else
-                    await Cache.RunExclusiveAsync(() => DocService.DeleteCategoryAsync(MenuState.CategoryId));
+                    await Cache.RunExclusiveAsync(() => DocService.RenameCategoryAsync(MenuState.CategoryId, newName));
 
                 await MenuState.NotifyCategoryModified();
             }
-            catch
+            catch (Exception ex)
             {
-                await JS.InvokeVoidAsync("alert",
-                    "Cannot delete this category. Remove all subcategories and documents first.");
+                await JS.InvokeVoidAsync("alert", $"Could not rename the folder. {ex.Message}");
             }
         }
     }

@@ -35,6 +35,7 @@ jobs:
         run: |
           Copy-Item install.ps1 -Destination ./publish/
           Copy-Item uninstall.ps1 -Destination ./publish/
+          Copy-Item installer\Configure-DecoSOP-Sync.ps1 -Destination ./publish/
         shell: powershell
 
       - name: Create zip (portable)
