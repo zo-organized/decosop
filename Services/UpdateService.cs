@@ -183,14 +183,15 @@ public sealed class UpdateService : IDisposable
         try
         {
             var baseDir = AppContext.BaseDirectory;
-            var stagingDir = Path.Combine(baseDir, "update-staging");
-            var zipPath = Path.Combine(stagingDir, "update.zip");
-            var extractDir = Path.Combine(stagingDir, "files");
+            var stagingRoot = Path.Combine(baseDir, "update-staging");
+            // A unique per-run folder so a leftover locked file (e.g. antivirus still scanning a
+            // previous attempt's update.zip) can never block a new update.
+            var runDir = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
+            var zipPath = Path.Combine(runDir, "update.zip");
+            var extractDir = Path.Combine(runDir, "files");
 
-            // Clean up any previous staging
-            if (Directory.Exists(stagingDir))
-                Directory.Delete(stagingDir, true);
-            Directory.CreateDirectory(stagingDir);
+            await TryDeleteDirectoryAsync(stagingRoot); // best-effort sweep of old runs; ok if still locked
+            Directory.CreateDirectory(runDir);
 
             // Download ZIP with progress
             _logger.LogInformation("Downloading update from {Url}", downloadUrl);
@@ -199,7 +200,7 @@ public sealed class UpdateService : IDisposable
 
             var totalBytes = response.Content.Headers.ContentLength ?? -1;
             await using var contentStream = await response.Content.ReadAsStreamAsync();
-            await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+            await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.Read, 81920, true);
 
             var buffer = new byte[81920];
             long bytesRead = 0;
@@ -219,12 +220,12 @@ public sealed class UpdateService : IDisposable
             IsDownloading = false;
             OnUpdateChecked?.Invoke();
 
-            // Extract ZIP
+            // Extract ZIP — retry to ride out antivirus briefly locking the freshly-written zip.
             _logger.LogInformation("Extracting update to {Dir}", extractDir);
-            ZipFile.ExtractToDirectory(zipPath, extractDir, true);
+            await RetryOnLockAsync(() => ZipFile.ExtractToDirectory(zipPath, extractDir, true));
 
             // Write the PowerShell update script
-            var scriptPath = Path.Combine(stagingDir, "apply-update.ps1");
+            var scriptPath = Path.Combine(runDir, "apply-update.ps1");
             var script = GenerateUpdateScript(baseDir, extractDir);
             await File.WriteAllTextAsync(scriptPath, script);
 
@@ -250,6 +251,30 @@ public sealed class UpdateService : IDisposable
             IsInstalling = false;
             UpdateError = $"Update failed: {ex.Message}";
             OnUpdateChecked?.Invoke();
+        }
+    }
+
+    /// <summary>Best-effort recursive delete that tolerates a briefly-locked file (antivirus, etc.).</summary>
+    private static async Task TryDeleteDirectoryAsync(string dir)
+    {
+        if (!Directory.Exists(dir)) return;
+        for (int i = 0; i < 5; i++)
+        {
+            try { Directory.Delete(dir, recursive: true); return; }
+            catch (IOException) { await Task.Delay(500); }
+            catch (UnauthorizedAccessException) { await Task.Delay(500); }
+        }
+        // Give up quietly — the unique per-run folder means we don't depend on this succeeding.
+    }
+
+    /// <summary>Run a file operation, retrying through transient locks (e.g. antivirus scanning a fresh file).</summary>
+    private static async Task RetryOnLockAsync(Action action, int attempts = 6, int delayMs = 2000)
+    {
+        for (int i = 1; ; i++)
+        {
+            try { action(); return; }
+            catch (IOException) when (i < attempts) { await Task.Delay(delayMs); }
+            catch (UnauthorizedAccessException) when (i < attempts) { await Task.Delay(delayMs); }
         }
     }
 
@@ -307,7 +332,9 @@ Get-ChildItem $stagingDir -Recurse | ForEach-Object {{
         if (-not (Test-Path $destDir)) {{
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }}
-        Copy-Item $_.FullName $dest -Force
+        for ($r = 0; $r -lt 5; $r++) {{
+            try {{ Copy-Item $_.FullName $dest -Force; break }} catch {{ Start-Sleep -Milliseconds 500 }}
+        }}
     }}
 }}
 
