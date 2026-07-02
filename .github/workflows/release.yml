@@ -4,6 +4,11 @@ on:
   push:
     tags: ["v*"]
 
+# The release step needs write access to create the GitHub release + upload assets.
+# Without this the default GITHUB_TOKEN is read-only and the upload fails with 403.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
