@@ -26,7 +26,7 @@ Built with Blazor Server (.NET 10) and SQLite. Runs as a Windows Service on a si
 
 ## Installation
 
-Download the latest `DecoSOP-Setup-<version>.exe` from the [Releases](https://github.com/Susguine/decosop/releases) page and run it **as Administrator**. The installer:
+Download the latest `DecoSOP-Setup-<version>.exe` from the [Releases](https://github.com/zo-organized/decosop/releases) page and run it **as Administrator**. The installer:
 
 - Installs to `C:\DecoSOP` (default)
 - Registers DecoSOP as a Windows Service that starts on boot

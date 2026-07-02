@@ -17,7 +17,7 @@ public sealed class UpdateService : IDisposable
 
     // Configurable via update-config.json next to the exe
     private bool _enabled = true;
-    private string _repoOwner = "Susguine";
+    private string _repoOwner = "zo-organized";
     private string _repoName = "DecoSOP";
     private TimeSpan _checkInterval = TimeSpan.FromHours(24);
     private string? _skippedVersion;

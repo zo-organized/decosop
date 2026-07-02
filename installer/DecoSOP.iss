@@ -22,7 +22,7 @@
 #define MyAppName "DecoSOP"
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "Tyler Sweeney"
-#define MyAppURL "https://github.com/Susguine/decosop"
+#define MyAppURL "https://github.com/zo-organized/decosop"
 #define MyAppExeName "DecoSOP.exe"
 #define LibreOfficeVersion "25.8.5"
 #define LibreOfficeFileName "LibreOffice_25.8.5_Win_x86-64.msi"
@@ -258,12 +258,12 @@ begin
   if IsAutoUpdateEnabled then
   begin
     if IsAutoInstallEnabled then
-      Result := '{ "enabled": true, "repoOwner": "Susguine", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": true, "autoInstallTime": "' + GetAutoInstallTime + '" }'
+      Result := '{ "enabled": true, "repoOwner": "zo-organized", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": true, "autoInstallTime": "' + GetAutoInstallTime + '" }'
     else
-      Result := '{ "enabled": true, "repoOwner": "Susguine", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": false, "autoInstallTime": "02:00" }';
+      Result := '{ "enabled": true, "repoOwner": "zo-organized", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": false, "autoInstallTime": "02:00" }';
   end
   else
-    Result := '{ "enabled": false, "repoOwner": "Susguine", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": false, "autoInstallTime": "02:00" }';
+    Result := '{ "enabled": false, "repoOwner": "zo-organized", "repoName": "DecoSOP", "checkIntervalHours": 24, "autoInstall": false, "autoInstallTime": "02:00" }';
 end;
 
 // ---- Service detection ----
