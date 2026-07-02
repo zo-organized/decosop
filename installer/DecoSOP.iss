@@ -20,7 +20,7 @@
 ; The category/file index is rebuilt from those folders automatically on startup.
 
 #define MyAppName "DecoSOP"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/zo-organized/decosop"
 #define MyAppExeName "DecoSOP.exe"
