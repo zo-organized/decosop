@@ -125,7 +125,13 @@ Type: filesandordirs; Name: "{app}\wwwroot"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\port.config"
 Type: files; Name: "{app}\update-config.json"
-; NOTE: database and uploads are intentionally preserved
+; Document-sync artifacts created post-install by Configure-DecoSOP-Sync (not tracked by [Files])
+Type: files; Name: "{app}\rclone.exe"
+Type: files; Name: "{app}\rclone.conf"
+Type: files; Name: "{app}\rclone-bisync.ps1"
+Type: files; Name: "{app}\appsettings.Production.json"
+; NOTE: the database, uploads, and the local {app}\sync mirror are intentionally preserved
+; (sync is just a rebuildable copy of OneDrive; delete it by hand if you want the space back)
 
 [Code]
 var

@@ -93,29 +93,24 @@ Both are offered by the **`Configure-DecoSOP-Sync`** tool (Start-menu shortcut /
 
 #### Method B — rclone, headless (for a machine that must run with no login)
 
-rclone syncs the library under the SYSTEM account, so no one needs to stay logged in and it survives reboots. It needs **one-time Entra (Azure AD) admin consent**, because most tenants require an administrator to approve third-party apps.
+rclone mirrors the library to a local folder and re-syncs on a **SYSTEM scheduled task**, so no one needs to stay logged in and it survives reboots. Run `Configure-DecoSOP-Sync` → **OneDrive / SharePoint (rclone)** and it walks you through it (it prints the exact answers for rclone's prompts). Two things to know going in:
 
-**Important — two different accounts are involved:**
-- The **file-owning account** (e.g. `admin@decodental.com`) is what rclone **signs into and syncs** — it does **not** need to be an org admin.
-- A **Global Administrator** account grants the **one-time app approval**. If the file-owning account isn't an org admin, it will hit a **"Need admin approval"** wall — that's expected.
+**1. One-time Entra (Azure AD) admin consent.** Most tenants require an administrator to approve third-party apps, so rclone's sign-in hits a **"Need admin approval"** wall. A **Global Administrator** clears it once:
+- Sign in at **entra.microsoft.com**, use the **search bar** at the top for **"Enterprise applications"** (the left-menu path varies by version), open **rclone → Security → Permissions → "Grant admin consent for &lt;org&gt;"**.
+- Or approve live: at the "Need admin approval" screen click **"Have an admin account? Sign in with that account,"** sign in as the Global Admin, tick **"Consent on behalf of your organization."**
 
-**Do it in this order** (so the sync token ends up tied to the file-owning account, not the admin):
+**2. Sign in as the *file-owning* account, not the admin.** rclone's sign-in uses whatever account the browser is currently logged into — and it can **silently grab the wrong one**. Sign in as the account whose OneDrive holds the documents (e.g. the shared office account); if the browser is on the Global Admin, sign that out at portal.office.com first (or use an InPrivate window). The tool warns you about this at the prompt.
 
-1. **As a Global Administrator**, pre-approve rclone once:
-   - **entra.microsoft.com → Identity → Applications → Enterprise applications → rclone → Security → Permissions → "Grant admin consent for &lt;org&gt;"**.
-   - (rclone appears here once someone has attempted the sign-in and hit the approval wall.)
-2. **Then** run `Configure-DecoSOP-Sync` → **SharePoint / OneDrive (rclone)**. When rclone's browser sign-in opens, log in as the **file-owning account** (`admin@decodental.com`) — it now goes straight through.
-3. Answer the remaining prompts: the remote paths (e.g. `remote:!  Admin@deco FILES/z PROTOCOLS`), the local folder to sync into, the sync interval, and the SharePoint/OneDrive web URLs for the **Open in Office** buttons (optional).
+After consent, the tool: shows your top-level folders (copy the exact names), asks for the SOP/Doc paths, offers to **exclude large video files** (recommended — they can't be previewed and bloat the sync), and asks a **sync interval** (5–15 min is healthy). It then writes the config, creates the **"DecoSOP Document Sync"** task, and starts the first download.
 
-The tool then writes `appsettings.Production.json`, creates the **"DecoSOP Document Sync"** SYSTEM scheduled task (removed automatically on uninstall), and restarts the service.
-
-**Alternative to step 1** (approve during the flow instead of pre-approving): at the "Need admin approval" screen, click **"Have an admin account? Sign in with that account,"** sign in as the Global Admin, and tick **"Consent on behalf of your organization."** Pre-approving first (step 1) is cleaner because it keeps the admin identity out of the sign-in that mints the sync token.
+**It's robust to interruptions:** the config + task are created *before* the (slow) first download, and the recurring sync **self-heals** (re-establishes its baseline automatically), so you can safely close the window mid-download — the task finishes it in the background. Re-run the tool any time to change folders, interval, or exclusions.
 
 ### Notes for both methods
 
 - **Sync only the SOP/Doc folders**, not the entire OneDrive — the rest is usually large and irrelevant.
 - Content should be **non-sensitive** — DecoSOP has no login and is reachable by anyone on the LAN.
-- If the folder is OneDrive **Files On-Demand**, remember previews/downloads need the bytes present (**"Always keep on this device"**); rclone copies real files so this doesn't apply to Method B.
+- **Latency:** a change shows up in DecoSOP within roughly the sync interval (OneDrive's own sync + the rclone poll); DecoSOP itself reflects a landed file within seconds.
+- If you use the **OneDrive client** (Method A), previews/downloads need the bytes present (**"Always keep on this device"**); rclone (Method B) copies real files, so that doesn't apply.
 
 ## Accessing the app
 
