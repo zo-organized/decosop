@@ -1,0 +1,34 @@
+@page "/inventory/category/{Id:int}"
+@using DecoSOP.Services
+@inject DataCacheService Cache
+
+<PageTitle>Inventory - DecoSOP</PageTitle>
+
+<div class="home-container" data-mode="inv">
+    <nav class="breadcrumb-nav">
+        <a href="inventory">Inventory</a>
+        @for (var n = 0; n < crumbs.Count; n++)
+        {
+            <span> / </span>
+            @if (n == crumbs.Count - 1)
+            {
+                <span>@crumbs[n].Name</span>
+            }
+            else
+            {
+                <a href="@($"inventory/category/{crumbs[n].Id}")">@crumbs[n].Name</a>
+            }
+        }
+    </nav>
+    <InventoryBrowser Scope="category" CategoryId="Id" />
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private List<(int Id, string Name)> crumbs = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        crumbs = await Cache.GetInvBreadcrumbsAsync(Id);
+    }
+}

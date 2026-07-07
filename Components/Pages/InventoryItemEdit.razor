@@ -1,0 +1,281 @@
+@page "/inventory/new"
+@page "/inventory/edit/{Id:int}"
+@using DecoSOP.Services
+@using DecoSOP.Models
+@inject InventoryService InvService
+@inject DataCacheService Cache
+@inject ContextMenuState MenuState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@(Id > 0 ? "Edit item" : "New item") - DecoSOP</PageTitle>
+
+<div class="home-container" data-mode="inv">
+    <div class="inv-form">
+        <div class="inv-form-header">
+            <h2>@(Id > 0 ? "Edit item" : "New item")</h2>
+            <div class="inv-form-actions">
+                @if (Id > 0)
+                {
+                    <button class="btn btn-sm btn-outline-danger" @onclick="Delete">Delete</button>
+                }
+                <button class="btn btn-sm btn-outline-secondary" @onclick="Cancel">Cancel</button>
+                <button class="btn btn-sm btn-primary" @onclick="Save">Save</button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(error))
+        {
+            <div class="alert alert-danger py-2">@error</div>
+        }
+
+        @if (!loaded)
+        {
+            <SkeletonCards />
+        }
+        else
+        {
+            <div class="inv-kind-toggle">
+                <button class="@(model.Kind == InventoryKind.Asset ? "active" : "")"
+                        @onclick="() => model.Kind = InventoryKind.Asset">Asset / Equipment</button>
+                <button class="@(model.Kind == InventoryKind.Consumable ? "active" : "")"
+                        @onclick="() => model.Kind = InventoryKind.Consumable">Consumable / Supply</button>
+            </div>
+
+            <div class="inv-form-section">
+                <div class="inv-form-grid">
+                    <div class="inv-form-group span-2">
+                        <label>Item name *</label>
+                        <input class="form-control" @bind="model.Title" />
+                    </div>
+                    <div class="inv-form-group">
+                        <label>Updated by *</label>
+                        <select class="form-select" @bind="staffName">
+                            <option value="">— pick your name —</option>
+                            @foreach (var s in staff) { <option value="@s.Name">@s.Name</option> }
+                        </select>
+                    </div>
+                    <div class="inv-form-group">
+                        <label>Category *</label>
+                        <select class="form-select" @bind="model.CategoryId">
+                            <option value="0">— choose —</option>
+                            @foreach (var c in catOptions) { <option value="@c.Id">@c.Label</option> }
+                        </select>
+                    </div>
+                    <div class="inv-form-group">
+                        <label>Location</label>
+                        <select class="form-select" @bind="LocationIdString">
+                            <option value="">—</option>
+                            @foreach (var l in locations) { <option value="@l.Id">@l.Name</option> }
+                        </select>
+                    </div>
+                    <div class="inv-form-group">
+                        <label>Barcode / SKU</label>
+                        <input class="form-control" @bind="model.Barcode" />
+                    </div>
+                    <div class="inv-form-group">
+                        <label>Lot #</label>
+                        <input class="form-control" @bind="model.Lot" />
+                    </div>
+                    <div class="inv-form-group span-3">
+                        <label>Description / notes</label>
+                        <textarea class="form-control" rows="2" @bind="model.Description"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            @if (model.Kind == InventoryKind.Consumable)
+            {
+                <div class="inv-form-section">
+                    <div class="inv-section-title">Stock</div>
+                    <div class="inv-form-grid">
+                        <div class="inv-form-group">
+                            <label>Quantity on hand</label>
+                            <input type="number" step="any" class="form-control" @bind="model.QuantityOnHand" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Unit</label>
+                            <input class="form-control" placeholder="box, each, ml…" @bind="model.Unit" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Reorder point</label>
+                            <input type="number" step="any" class="form-control" @bind="model.ReorderPoint" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Expiration date</label>
+                            <input type="date" class="form-control" @bind="model.ExpirationDate" />
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="inv-form-section">
+                    <div class="inv-section-title">Equipment details</div>
+                    <div class="inv-form-grid">
+                        <div class="inv-form-group">
+                            <label>Item type</label>
+                            <input class="form-control" placeholder="Handpiece, Autoclave…" @bind="model.ItemType" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Brand / make</label>
+                            <input class="form-control" @bind="model.Brand" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Model</label>
+                            <input class="form-control" @bind="model.Model" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Manufacturer</label>
+                            <input class="form-control" @bind="model.Manufacturer" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Identifier / serial #</label>
+                            <input class="form-control" @bind="model.Identifier" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Status</label>
+                            <select class="form-select" @bind="model.Status">
+                                <option>Active</option>
+                                <option>In Repair</option>
+                                <option>Inactive</option>
+                                <option>Retired</option>
+                            </select>
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Current value</label>
+                            <input type="number" step="any" class="form-control" @bind="model.CurrentValue" />
+                        </div>
+                        <div class="inv-form-check">
+                            <input type="checkbox" class="form-check-input" id="sds" @bind="model.SdsOnFile" />
+                            <label for="sds" style="text-transform:none;">SDS on file</label>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="inv-form-section">
+                    <summary>Purchase &amp; warranty</summary>
+                    <div class="inv-form-grid">
+                        <div class="inv-form-group">
+                            <label>Price</label>
+                            <input type="number" step="any" class="form-control" @bind="model.Price" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Purchase date</label>
+                            <input type="date" class="form-control" @bind="model.PurchaseDate" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Seller</label>
+                            <input class="form-control" @bind="model.Seller" />
+                        </div>
+                        <div class="inv-form-group span-2">
+                            <label>Warranty info</label>
+                            <input class="form-control" @bind="model.WarrantyInfo" />
+                        </div>
+                        <div class="inv-form-group">
+                            <label>Warranty expires</label>
+                            <input type="date" class="form-control" @bind="model.WarrantyExpiration" />
+                        </div>
+                        <div class="inv-form-group span-3">
+                            <label>Use</label>
+                            <input class="form-control" @bind="model.Use" />
+                        </div>
+                    </div>
+                </details>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [SupplyParameterFromQuery] public int? CategoryId { get; set; }
+    [SupplyParameterFromQuery] public string? Barcode { get; set; }
+
+    private InventoryItem model = new();
+    private List<(int Id, string Label)> catOptions = [];
+    private List<InventoryLocation> locations = [];
+    private List<InventoryStaff> staff = [];
+    private string staffName = "";
+    private string? error;
+    private bool loaded;
+
+    private string LocationIdString
+    {
+        get => model.LocationId?.ToString() ?? "";
+        set => model.LocationId = int.TryParse(value, out var v) ? v : null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        locations = await Cache.GetInvLocationsAsync();
+        staff = await Cache.GetInvStaffAsync();
+        var tree = await Cache.GetInvTreeAsync();
+        catOptions.Clear();
+        BuildCatOptions(tree, 0);
+
+        if (Id > 0)
+        {
+            var existing = await Cache.RunExclusiveAsync(() => InvService.GetItemAsync(Id));
+            if (existing is not null) model = existing;
+        }
+        else
+        {
+            model = new InventoryItem
+            {
+                Kind = InventoryKind.Asset,
+                Status = "Active",
+                CategoryId = CategoryId ?? 0,
+                Barcode = Barcode
+            };
+        }
+        loaded = true;
+    }
+
+    private void BuildCatOptions(List<InventoryCategory> nodes, int depth)
+    {
+        foreach (var c in nodes.OrderBy(c => c.Name))
+        {
+            catOptions.Add((c.Id, new string(' ', depth * 4) + c.Name));
+            BuildCatOptions(c.Children, depth + 1);
+        }
+    }
+
+    private async Task Save()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(model.Title)) { error = "Item name is required."; return; }
+        if (model.CategoryId == 0) { error = "Pick a category."; return; }
+        if (string.IsNullOrWhiteSpace(staffName)) { error = "Pick your name so we know who made this change."; return; }
+
+        try
+        {
+            if (Id > 0)
+                await Cache.RunExclusiveAsync(() => InvService.UpdateItemAsync(model, staffName));
+            else
+                await Cache.RunExclusiveAsync(() => InvService.CreateItemAsync(model, staffName));
+
+            Cache.InvalidateInv();
+            await MenuState.NotifyCategoryModified();
+            Nav.NavigateTo(model.CategoryId > 0 ? $"inventory/category/{model.CategoryId}" : "inventory");
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private void Cancel()
+        => Nav.NavigateTo(model.CategoryId > 0 ? $"inventory/category/{model.CategoryId}" : "inventory");
+
+    private async Task Delete()
+    {
+        if (Id == 0) return;
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Delete \"{model.Title}\"? This removes the item and its history.");
+        if (!ok) return;
+        await Cache.RunExclusiveAsync(() => InvService.DeleteItemAsync(Id, staffName));
+        Cache.InvalidateInv();
+        await MenuState.NotifyCategoryModified();
+        Nav.NavigateTo(model.CategoryId > 0 ? $"inventory/category/{model.CategoryId}" : "inventory");
+    }
+}

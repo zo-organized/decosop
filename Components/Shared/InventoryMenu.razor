@@ -1,0 +1,190 @@
+@using DecoSOP.Services
+@using DecoSOP.Models
+@inject DataCacheService Cache
+@inject ContextMenuState MenuState
+@inject NavigationManager Nav
+@inject InventoryService InvService
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Grouped category menu (left column of the property-style layout). *@
+<div class="inv-menu">
+    @* Views group *@
+    <div class="menu-group">
+        <button class="menu-group-header" @onclick='() => ToggleSection("inventory")'>
+            <span class="group-icon">&#128230;</span>
+            <span class="group-name">Inventory</span>
+            <span class="chevron">@(IsExpanded("inventory") ? "▾" : "▸")</span>
+        </button>
+        @if (IsExpanded("inventory"))
+        {
+            <div class="menu-group-items">
+                <a class="menu-item leaf @ActiveView("summary")" href="inventory">
+                    <span class="item-icon">&#9776;</span><span>All Items — Summary</span>
+                </a>
+                <a class="menu-item leaf @ActiveView("detail")" href="inventory?view=detail">
+                    <span class="item-icon">&#9636;</span><span>All Items — Detailed</span>
+                </a>
+            </div>
+        }
+    </div>
+
+    @* Favorites group *@
+    @if (favCategories.Count > 0 || favItems.Count > 0)
+    {
+        <div class="menu-group">
+            <button class="menu-group-header" @onclick='() => ToggleSection("favorites")'>
+                <span class="group-icon">&#9733;</span>
+                <span class="group-name">Favorites</span>
+                <span class="chevron">@(IsExpanded("favorites") ? "▾" : "▸")</span>
+            </button>
+            @if (IsExpanded("favorites"))
+            {
+                <div class="menu-group-items">
+                    @foreach (var c in favCategories)
+                    {
+                        <a class="menu-item leaf @ActiveCat(c.Id)" href="@($"inventory/category/{c.Id}")"><span>@c.Name</span></a>
+                    }
+                    @foreach (var it in favItems)
+                    {
+                        <a class="menu-item leaf" href="@($"inventory?sel={it.Id}")"><span>@it.Title</span></a>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* Category groups *@
+    @foreach (var cat in categories.OrderBy(c => c.Name))
+    {
+        <div class="menu-group">
+            <div class="menu-group-header category"
+                 @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, cat.Id, cat.Name, false, false, null, CategoryType.Inventory)"
+                 @oncontextmenu:preventDefault="true">
+                <button class="header-toggle" @onclick="() => ToggleCategory(cat.Id)">
+                    <span class="chevron">@(IsCatExpanded(cat.Id) ? "▾" : "▸")</span>
+                </button>
+                <span class="group-name">@cat.Name</span>
+                <a class="parent-add" href="@($"inventory/new?categoryId={cat.Id}")" title="Add item to @cat.Name">+</a>
+            </div>
+            @if (IsCatExpanded(cat.Id))
+            {
+                <div class="menu-group-items">
+                    <a class="menu-item leaf @ActiveCat(cat.Id)" href="@($"inventory/category/{cat.Id}")"><span>All @cat.Name</span></a>
+                    @foreach (var sub in cat.Children.OrderBy(c => c.Name))
+                    {
+                        <a class="menu-item leaf @ActiveCat(sub.Id)" href="@($"inventory/category/{sub.Id}")"
+                           @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, sub.Id, sub.Name, false, false, null, CategoryType.Inventory)"
+                           @oncontextmenu:preventDefault="true"><span>@sub.Name</span></a>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* New category action *@
+    <button class="menu-new-category" @onclick="CreateCategory" title="Create a new top-level category">
+        <span class="item-icon">&#65291;</span><span>New category</span>
+    </button>
+
+    @* Quick Views group *@
+    <div class="menu-group">
+        <button class="menu-group-header" @onclick='() => ToggleSection("quick")'>
+            <span class="group-icon">&#9889;</span>
+            <span class="group-name">Quick Views</span>
+            <span class="chevron">@(IsExpanded("quick") ? "▾" : "▸")</span>
+        </button>
+        @if (IsExpanded("quick"))
+        {
+            <div class="menu-group-items">
+                <a class="menu-item leaf @ActivePath("low-stock")" href="inventory/low-stock"><span>Low Stock</span></a>
+                <a class="menu-item leaf @ActivePath("expiring")" href="inventory/expiring"><span>Expiring</span></a>
+                <a class="menu-item leaf @ActivePath("manage")" href="inventory/manage"><span>Staff &amp; Locations</span></a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<InventoryCategory> categories = [];
+    private List<InventoryCategory> favCategories = [];
+    private List<InventoryItem> favItems = [];
+    private readonly Dictionary<string, bool> sections = new() { ["inventory"] = true, ["favorites"] = true, ["quick"] = false };
+    private HashSet<int> expandedCats = [];
+
+    protected override void OnInitialized()
+    {
+        MenuState.OnCategoryModified += Refresh;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        categories = await Cache.GetInvTreeAsync();
+        favCategories = await Cache.GetInvFavoriteCategoriesAsync();
+        favItems = await Cache.GetInvFavoriteItemsAsync();
+    }
+
+    private async Task Refresh()
+    {
+        Cache.InvalidateInv();
+        await Load();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    private async Task CreateCategory()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "New category name:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (name.Trim().Length > 200)
+        {
+            await JS.InvokeVoidAsync("alert", "Name must be 200 characters or fewer.");
+            return;
+        }
+
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.CreateCategoryAsync(name));
+            Cache.InvalidateInv();
+            await Load();
+            await MenuState.NotifyCategoryModified();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Could not create the category. {ex.Message}");
+        }
+    }
+
+    private bool IsExpanded(string key) => sections.TryGetValue(key, out var v) && v;
+    private void ToggleSection(string key) => sections[key] = !IsExpanded(key);
+    private bool IsCatExpanded(int id) => expandedCats.Contains(id);
+    private void ToggleCategory(int id) { if (!expandedCats.Remove(id)) expandedCats.Add(id); }
+
+    private string ActiveCat(int id)
+        => Nav.Uri.Contains($"inventory/category/{id}", StringComparison.OrdinalIgnoreCase)
+           && Nav.ToAbsoluteUri(Nav.Uri).AbsolutePath.TrimEnd('/').EndsWith($"/{id}") ? "active" : "";
+
+    private string ActivePath(string segment)
+        => Nav.Uri.Contains($"inventory/{segment}", StringComparison.OrdinalIgnoreCase) ? "active" : "";
+
+    private string ActiveView(string view)
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var onAll = uri.AbsolutePath.TrimEnd('/').EndsWith("/inventory", StringComparison.OrdinalIgnoreCase);
+        if (!onAll) return "";
+        var isDetail = uri.Query.Contains("view=detail", StringComparison.OrdinalIgnoreCase);
+        return (view == "detail" ? isDetail : !isDetail) ? "active" : "";
+    }
+
+    public void Dispose()
+    {
+        MenuState.OnCategoryModified -= Refresh;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

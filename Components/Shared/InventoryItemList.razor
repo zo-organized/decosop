@@ -1,0 +1,173 @@
+@using DecoSOP.Models
+
+@* Presentational summary/detail table. Sorting is local; selection/data come from the parent.
+   View="summary" = compact key columns; View="detail" = wide table with all columns (horizontal scroll). *@
+<div class="inv-scroll @(Detail ? "inv-scroll-x" : "")">
+    <table class="inv-table @(Detail ? "inv-table-wide" : "")">
+        <thead>
+            <tr>
+                <th @onclick='() => SetSort("title")'>Item<span class="inv-sort-icon">@Ind("title")</span></th>
+                <th @onclick='() => SetSort("kind")'>Kind<span class="inv-sort-icon">@Ind("kind")</span></th>
+                @if (ShowCategory)
+                {
+                    <th @onclick='() => SetSort("category")'>Category<span class="inv-sort-icon">@Ind("category")</span></th>
+                }
+                <th @onclick='() => SetSort("location")'>Location<span class="inv-sort-icon">@Ind("location")</span></th>
+                @if (Detail)
+                {
+                    <th class="no-sort">Brand / Model</th>
+                    <th class="no-sort">Barcode</th>
+                    <th class="no-sort">Serial #</th>
+                }
+                <th @onclick='() => SetSort("qty")'>Qty / Value<span class="inv-sort-icon">@Ind("qty")</span></th>
+                @if (Detail)
+                {
+                    <th class="no-sort">Reorder</th>
+                    <th class="no-sort">Expires</th>
+                }
+                <th @onclick='() => SetSort("status")'>Status<span class="inv-sort-icon">@Ind("status")</span></th>
+                <th class="no-sort">Flags</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var i in Sorted())
+            {
+                <tr class="inv-row @(SelectedId == i.Id ? "selected" : "")"
+                    @onclick="() => OnRowClick.InvokeAsync(i)">
+                    <td class="inv-cell-title">@i.Title</td>
+                    <td>
+                        <span class="inv-badge @(i.Kind == InventoryKind.Consumable ? "inv-badge-consumable" : "inv-badge-asset")">
+                            @(i.Kind == InventoryKind.Consumable ? "Supply" : "Asset")
+                        </span>
+                    </td>
+                    @if (ShowCategory)
+                    {
+                        <td>@(i.Category?.Name ?? "—")</td>
+                    }
+                    <td>@(i.Location?.Name ?? "—")</td>
+                    @if (Detail)
+                    {
+                        <td>@(Join(i.Brand, i.Model))</td>
+                        <td>@(i.Barcode ?? "—")</td>
+                        <td>@(i.Identifier ?? "—")</td>
+                    }
+                    <td>
+                        @if (i.Kind == InventoryKind.Consumable)
+                        {
+                            @Qty(i.QuantityOnHand)<span class="text-muted"> @i.Unit</span>
+                        }
+                        else if (i.CurrentValue is decimal v)
+                        {
+                            @v.ToString("C0")
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    @if (Detail)
+                    {
+                        <td class="inv-cell-num">@(i.ReorderPoint is decimal rp ? Qty(rp) : "—")</td>
+                        <td>@(i.ExpirationDate?.ToShortDateString() ?? "—")</td>
+                    }
+                    <td>
+                        @if (i.Kind == InventoryKind.Consumable)
+                        {
+                            @if (IsLow(i))
+                            {
+                                <span class="inv-badge inv-badge-low">Low</span>
+                            }
+                            else
+                            {
+                                <span class="inv-badge inv-badge-ok">OK</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="inv-badge @StatusClass(i.Status)">@i.Status</span>
+                        }
+                    </td>
+                    <td>
+                        @{ var flag = ExpiryFlag(i); }
+                        @if (flag is not null)
+                        {
+                            <span class="inv-badge @flag.Value.Cls" title="@flag.Value.Tip">@flag.Value.Txt</span>
+                        }
+                        @if (i.SdsOnFile)
+                        {
+                            <span class="inv-badge inv-badge-muted" title="Safety Data Sheet on file">SDS</span>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Items.Count == 0)
+            {
+                <tr><td colspan="@ColCount" class="inv-empty">No items.</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public List<InventoryItem> Items { get; set; } = [];
+    [Parameter] public int? SelectedId { get; set; }
+    [Parameter] public EventCallback<InventoryItem> OnRowClick { get; set; }
+    [Parameter] public bool ShowCategory { get; set; } = true;
+    [Parameter] public string View { get; set; } = "summary";
+
+    private bool Detail => View == "detail";
+    private int ColCount => 5 + (ShowCategory ? 1 : 0) + (Detail ? 5 : 0);
+
+    private string sortKey = "title";
+    private bool sortAsc = true;
+
+    private void SetSort(string key)
+    {
+        if (sortKey == key) sortAsc = !sortAsc;
+        else { sortKey = key; sortAsc = true; }
+    }
+
+    private string Ind(string key) => sortKey == key ? (sortAsc ? "▲" : "▼") : "";
+
+    private IEnumerable<InventoryItem> Sorted()
+    {
+        Func<InventoryItem, object?> sel = sortKey switch
+        {
+            "kind" => i => i.Kind,
+            "category" => i => i.Category?.Name,
+            "location" => i => i.Location?.Name,
+            "qty" => i => i.Kind == InventoryKind.Consumable ? (i.QuantityOnHand ?? 0) : (i.CurrentValue ?? 0),
+            "status" => i => i.Status,
+            _ => i => i.Title
+        };
+        return sortAsc ? Items.OrderBy(sel) : Items.OrderByDescending(sel);
+    }
+
+    private static string Join(string? a, string? b)
+    {
+        var parts = new[] { a, b }.Where(s => !string.IsNullOrWhiteSpace(s));
+        var joined = string.Join(" ", parts);
+        return string.IsNullOrWhiteSpace(joined) ? "—" : joined;
+    }
+
+    private static string Qty(decimal? q) => (q ?? 0).ToString("0.###");
+
+    private static bool IsLow(InventoryItem i)
+        => i.Kind == InventoryKind.Consumable && i.ReorderPoint is decimal rp && (i.QuantityOnHand ?? 0) <= rp;
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Active" => "inv-badge-ok",
+        "In Repair" => "inv-badge-warn",
+        _ => "inv-badge-muted"
+    };
+
+    private static (string Cls, string Txt, string Tip)? ExpiryFlag(InventoryItem i)
+    {
+        if (i.Kind != InventoryKind.Consumable || i.ExpirationDate is not DateTime ex) return null;
+        var today = DateTime.UtcNow.Date;
+        if (ex.Date < today) return ("inv-badge-low", "Expired", $"Expired {ex.ToShortDateString()}");
+        if (ex.Date <= today.AddDays(30)) return ("inv-badge-warn", "Expiring", $"Expires {ex.ToShortDateString()}");
+        return null;
+    }
+}

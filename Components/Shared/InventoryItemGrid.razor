@@ -1,0 +1,192 @@
+@using DecoSOP.Services
+@using DecoSOP.Models
+@inject InventoryService InvService
+@inject DataCacheService Cache
+
+@* Inline-editable list/detail grid. Read-only text until a staff name is chosen (in the toolbar); then edits persist per-cell (on blur). *@
+<div class="inv-scroll">
+    <table class="inv-table inv-grid">
+        <colgroup>
+            <col style="width:11%" /><col style="width:7%" /><col style="width:10%" /><col style="width:7%" />
+            <col style="width:7%" /><col style="width:7%" /><col style="width:9%" /><col style="width:7%" />
+            <col style="width:6%" /><col style="width:5%" /><col style="width:4%" /><col style="width:4%" />
+            <col style="width:6%" /><col style="width:10%" />
+        </colgroup>
+        <thead>
+            <tr>
+                <th>Item</th><th>Kind</th><th>Category</th><th>Location</th>
+                <th>Brand</th><th>Model</th><th>Barcode</th><th>Serial #</th>
+                <th>Status</th><th class="num-col">Value</th>
+                <th class="num-col">Qty</th><th>Unit</th><th class="num-col">Reorder</th><th>Expires</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var i in Items)
+            {
+                var consumable = i.Kind == InventoryKind.Consumable;
+                <tr @key="i.Id">
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Title">@i.Title</span> }
+                        else { <input class="inv-cell-input" @bind="i.Title" @bind:after="() => Save(i)" /> }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro">@(consumable ? "Supply" : "Asset")</span> }
+                        else
+                        {
+                            <select class="inv-cell-input" @bind="i.Kind" @bind:after="() => Save(i)">
+                                <option value="@InventoryKind.Asset">Asset</option>
+                                <option value="@InventoryKind.Consumable">Supply</option>
+                            </select>
+                        }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Category?.Name">@i.Category?.Name</span> }
+                        else
+                        {
+                            <select class="inv-cell-input" value="@i.CategoryId" @onchange="(e) => OnCategoryChanged(i, e)">
+                                @foreach (var c in catOptions)
+                                {
+                                    <option value="@c.Id" selected="@(c.Id == i.CategoryId)">@c.Label</option>
+                                }
+                            </select>
+                        }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Location?.Name">@i.Location?.Name</span> }
+                        else
+                        {
+                            <select class="inv-cell-input" value="@(i.LocationId?.ToString() ?? "")" @onchange="(e) => OnLocationChanged(i, e)">
+                                <option value="">—</option>
+                                @foreach (var l in Locations)
+                                {
+                                    <option value="@l.Id" selected="@(l.Id == i.LocationId)">@l.Name</option>
+                                }
+                            </select>
+                        }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Brand">@i.Brand</span> }
+                        else { <input class="inv-cell-input" @bind="i.Brand" @bind:after="() => Save(i)" /> }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Model">@i.Model</span> }
+                        else { <input class="inv-cell-input" @bind="i.Model" @bind:after="() => Save(i)" /> }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Barcode">@i.Barcode</span> }
+                        else { <input class="inv-cell-input" @bind="i.Barcode" @bind:after="() => Save(i)" /> }
+                    </td>
+                    <td>
+                        @if (Disabled) { <span class="inv-cell-ro" title="@i.Identifier">@i.Identifier</span> }
+                        else { <input class="inv-cell-input" @bind="i.Identifier" @bind:after="() => Save(i)" /> }
+                    </td>
+                    <td>
+                        @if (!consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro">@i.Status</span> }
+                            else
+                            {
+                                <select class="inv-cell-input" @bind="i.Status" @bind:after="() => Save(i)">
+                                    <option>Active</option><option>In Repair</option><option>Inactive</option><option>Retired</option>
+                                </select>
+                            }
+                        }
+                    </td>
+                    <td class="num-col">
+                        @if (!consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro num">@i.CurrentValue?.ToString("0.##")</span> }
+                            else { <input type="number" step="any" class="inv-cell-input num" @bind="i.CurrentValue" @bind:after="() => Save(i)" /> }
+                        }
+                    </td>
+                    <td class="num-col">
+                        @if (consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro num">@i.QuantityOnHand?.ToString("0.###")</span> }
+                            else { <input type="number" step="any" class="inv-cell-input num" @bind="i.QuantityOnHand" @bind:after="() => Save(i)" /> }
+                        }
+                    </td>
+                    <td>
+                        @if (consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro" title="@i.Unit">@i.Unit</span> }
+                            else { <input class="inv-cell-input" @bind="i.Unit" @bind:after="() => Save(i)" /> }
+                        }
+                    </td>
+                    <td class="num-col">
+                        @if (consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro num">@i.ReorderPoint?.ToString("0.###")</span> }
+                            else { <input type="number" step="any" class="inv-cell-input num" @bind="i.ReorderPoint" @bind:after="() => Save(i)" /> }
+                        }
+                    </td>
+                    <td>
+                        @if (consumable)
+                        {
+                            @if (Disabled) { <span class="inv-cell-ro">@i.ExpirationDate?.ToShortDateString()</span> }
+                            else { <input type="date" class="inv-cell-input" @bind="i.ExpirationDate" @bind:after="() => Save(i)" /> }
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Items.Count == 0)
+            {
+                <tr><td colspan="14" class="inv-empty">No items.</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public List<InventoryItem> Items { get; set; } = [];
+    [Parameter] public List<InventoryLocation> Locations { get; set; } = [];
+    [Parameter] public List<InventoryCategory> Categories { get; set; } = [];
+    [Parameter] public string EditingStaff { get; set; } = "";
+    [Parameter] public EventCallback<string> OnSaved { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private readonly List<(int Id, string Label)> catOptions = [];
+
+    private bool Disabled => string.IsNullOrWhiteSpace(EditingStaff);
+
+    protected override void OnParametersSet()
+    {
+        catOptions.Clear();
+        BuildCat(Categories, 0);
+    }
+
+    private void BuildCat(List<InventoryCategory> nodes, int depth)
+    {
+        foreach (var c in nodes.OrderBy(c => c.Name))
+        {
+            catOptions.Add((c.Id, new string(' ', depth * 3) + c.Name));
+            BuildCat(c.Children, depth + 1);
+        }
+    }
+
+    private async Task OnCategoryChanged(InventoryItem item, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id)) item.CategoryId = id;
+        await Save(item);
+    }
+
+    private async Task OnLocationChanged(InventoryItem item, ChangeEventArgs e)
+    {
+        item.LocationId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await Save(item);
+    }
+
+    private async Task Save(InventoryItem item)
+    {
+        if (Disabled) return;
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.UpdateItemAsync(item, EditingStaff));
+            await OnSaved.InvokeAsync($"Saved “{item.Title}”");
+        }
+        catch (Exception ex)
+        {
+            await OnSaved.InvokeAsync(ex.Message);
+        }
+    }
+}

@@ -1,0 +1,151 @@
+@page "/inventory/manage"
+@using DecoSOP.Services
+@using DecoSOP.Models
+@inject InventoryService InvService
+@inject DataCacheService Cache
+@inject IJSRuntime JS
+
+<PageTitle>Manage inventory - DecoSOP</PageTitle>
+
+<div class="home-container" data-mode="inv">
+    <div class="settings-container">
+        <p class="breadcrumb-nav"><a href="inventory">‹ Inventory</a></p>
+        <div class="settings-section">
+            <h2>Staff</h2>
+            <p class="text-muted small">Names shown in the "who did this" dropdowns. No passwords.</p>
+            <table class="table table-sm" style="max-width:480px;">
+                <tbody>
+                    @foreach (var s in staff)
+                    {
+                        <tr class="@(s.IsActive ? "" : "text-muted")">
+                            <td>@s.Name @(s.IsActive ? "" : "(inactive)")</td>
+                            <td style="text-align:right; white-space:nowrap;">
+                                <button class="btn btn-sm btn-link p-0 me-2" @onclick="() => RenameStaff(s)">Rename</button>
+                                <button class="btn btn-sm btn-link p-0" @onclick="() => ToggleStaff(s)">@(s.IsActive ? "Deactivate" : "Reactivate")</button>
+                            </td>
+                        </tr>
+                    }
+                    @if (staff.Count == 0)
+                    {
+                        <tr><td class="text-muted small">No staff yet.</td></tr>
+                    }
+                </tbody>
+            </table>
+            <div class="d-flex gap-2" style="max-width:480px;">
+                <input class="form-control form-control-sm" placeholder="New staff name" @bind="newStaff" @onkeyup="StaffKey" />
+                <button class="btn btn-sm btn-primary" @onclick="AddStaff">Add</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(staffError)) { <div class="text-danger small mt-1">@staffError</div> }
+        </div>
+
+        <div class="settings-section">
+            <h2>Locations</h2>
+            <p class="text-muted small">Operatories and areas an item can live in.</p>
+            <table class="table table-sm" style="max-width:480px;">
+                <tbody>
+                    @foreach (var l in locations)
+                    {
+                        <tr class="@(l.IsActive ? "" : "text-muted")">
+                            <td>@l.Name @(l.IsActive ? "" : "(inactive)")</td>
+                            <td style="text-align:right; white-space:nowrap;">
+                                <button class="btn btn-sm btn-link p-0 me-2" @onclick="() => RenameLocation(l)">Rename</button>
+                                <button class="btn btn-sm btn-link p-0" @onclick="() => ToggleLocation(l)">@(l.IsActive ? "Deactivate" : "Reactivate")</button>
+                            </td>
+                        </tr>
+                    }
+                    @if (locations.Count == 0)
+                    {
+                        <tr><td class="text-muted small">No locations yet.</td></tr>
+                    }
+                </tbody>
+            </table>
+            <div class="d-flex gap-2" style="max-width:480px;">
+                <input class="form-control form-control-sm" placeholder="New location" @bind="newLocation" @onkeyup="LocationKey" />
+                <button class="btn btn-sm btn-primary" @onclick="AddLocation">Add</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(locError)) { <div class="text-danger small mt-1">@locError</div> }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<InventoryStaff> staff = [];
+    private List<InventoryLocation> locations = [];
+    private string newStaff = "";
+    private string newLocation = "";
+    private string? staffError;
+    private string? locError;
+
+    protected override async Task OnInitializedAsync() => await LoadAll();
+
+    private async Task LoadAll()
+    {
+        staff = await Cache.RunExclusiveAsync(() => InvService.GetStaffAsync(false));
+        locations = await Cache.RunExclusiveAsync(() => InvService.GetLocationsAsync(false));
+    }
+
+    private void Invalidate() => Cache.InvalidateInv();
+
+    private async Task StaffKey(KeyboardEventArgs e) { if (e.Key == "Enter") await AddStaff(); }
+    private async Task LocationKey(KeyboardEventArgs e) { if (e.Key == "Enter") await AddLocation(); }
+
+    private async Task AddStaff()
+    {
+        staffError = null;
+        if (string.IsNullOrWhiteSpace(newStaff)) return;
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.AddStaffAsync(newStaff));
+            newStaff = "";
+            Invalidate();
+            await LoadAll();
+        }
+        catch (Exception ex) { staffError = ex.Message; }
+    }
+
+    private async Task RenameStaff(InventoryStaff s)
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Rename staff member:", s.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == s.Name) return;
+        await Cache.RunExclusiveAsync(() => InvService.RenameStaffAsync(s.Id, name));
+        Invalidate();
+        await LoadAll();
+    }
+
+    private async Task ToggleStaff(InventoryStaff s)
+    {
+        await Cache.RunExclusiveAsync(() => InvService.SetStaffActiveAsync(s.Id, !s.IsActive));
+        Invalidate();
+        await LoadAll();
+    }
+
+    private async Task AddLocation()
+    {
+        locError = null;
+        if (string.IsNullOrWhiteSpace(newLocation)) return;
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.AddLocationAsync(newLocation));
+            newLocation = "";
+            Invalidate();
+            await LoadAll();
+        }
+        catch (Exception ex) { locError = ex.Message; }
+    }
+
+    private async Task RenameLocation(InventoryLocation l)
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Rename location:", l.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == l.Name) return;
+        await Cache.RunExclusiveAsync(() => InvService.RenameLocationAsync(l.Id, name));
+        Invalidate();
+        await LoadAll();
+    }
+
+    private async Task ToggleLocation(InventoryLocation l)
+    {
+        await Cache.RunExclusiveAsync(() => InvService.SetLocationActiveAsync(l.Id, !l.IsActive));
+        Invalidate();
+        await LoadAll();
+    }
+}

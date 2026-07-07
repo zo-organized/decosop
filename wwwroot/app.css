@@ -663,6 +663,32 @@ h1:focus {
 }
 
 /* ============================================
+   Inventory Mode — Teal color scheme
+   ============================================ */
+
+.page:has([data-mode="inv"]) {
+    --accent: #00897b;
+    --accent-link: #00796b;
+    --accent-dark: #00796b;
+    --accent-darker: #00695c;
+    --accent-bg: #e0f2f1;
+    --accent-focus: #4db6ac;
+    --sidebar-top: rgb(0, 77, 64);
+    --sidebar-bottom: #06302b;
+    --sidebar-resizer-color: rgba(0, 137, 123, 0.3);
+}
+
+.page:has([data-mode="inv"]) .btn-success {
+    background-color: #00897b;
+    border-color: #00796b;
+}
+
+.page:has([data-mode="inv"]) .btn-success:hover {
+    background-color: #00796b;
+    border-color: #00695c;
+}
+
+/* ============================================
    Folder Icon
    ============================================ */
 
@@ -857,6 +883,513 @@ h1:focus {
 .update-banner-close:hover {
     color: white;
 }
+
+/* ============================================
+   Inventory module
+   ============================================ */
+
+.inv-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.inv-tabs {
+    display: flex;
+    gap: 0.15rem;
+}
+
+.inv-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #495057;
+    text-decoration: none;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.inv-tab:hover {
+    background: var(--accent-bg);
+    color: var(--accent-dark);
+    text-decoration: none;
+}
+
+.inv-tab.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.inv-scanbox { position: relative; display: flex; align-items: center; }
+
+.inv-scanbox .inv-scan-icon {
+    position: absolute;
+    left: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.76rem;
+    color: #6c757d;
+    pointer-events: none;
+}
+
+/* Specific enough to beat the .inv-toolbar .form-control-sm padding reset below. */
+.inv-toolbar .inv-scanbox input {
+    padding-left: 1.55rem;
+    width: 185px;
+    font-size: 0.78rem;
+}
+
+.inv-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+
+.inv-toolbar .form-control { max-width: 210px; }
+.inv-toolbar .form-select { max-width: 145px; }
+
+.inv-layout {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    min-height: calc(100vh - 7rem);
+    /* Full-bleed so the menu sits flush to the left (cancels article's 2rem left /
+       1.5rem right padding). Applied here (not the page container) so leaf pages
+       like Manage / New-Item keep normal padding. */
+    margin-left: -2rem;
+    margin-right: -1.5rem;
+    padding-right: 1.5rem;
+}
+
+.inv-list-col { flex: 1 1 auto; min-width: 0; padding: 0 1rem; }
+
+.inv-side-col {
+    flex: 0 0 380px;
+    max-width: 420px;
+    position: sticky;
+    top: 1rem;
+    align-self: flex-start;
+    border-left: 1px solid #dee2e6;
+    padding-left: 1rem;
+}
+
+@media (max-width: 1100px) {
+    .inv-layout { flex-direction: column; }
+    .inv-menu-col { flex-basis: auto; width: 100%; }
+    .inv-side-col { flex-basis: auto; max-width: none; width: 100%; position: static; }
+}
+
+/* In-content grouped category menu — a full-height sidebar, not a card */
+.inv-menu-col {
+    flex: 0 0 215px;
+    border-right: 1px solid #dee2e6;
+    background: #fff;
+}
+
+.inv-menu {
+    font-size: 0.76rem;
+    background: #fff;
+    height: 100%;
+}
+
+.inv-menu .menu-group { border-bottom: 1px solid #f0f0f0; }
+
+.inv-menu .menu-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.25rem 0.45rem;
+    border: none;
+    border-left: 3px solid var(--accent);
+    background: #eef1f3;
+    font-weight: 700;
+    font-size: 0.63rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #495057;
+    cursor: pointer;
+    text-align: left;
+}
+
+.inv-menu .menu-group-header:hover { background: #e4e8eb; }
+.inv-menu .menu-group-header .group-name { flex: 1; }
+.inv-menu .menu-group-header .group-icon { font-size: 0.8rem; opacity: 0.8; }
+.inv-menu .menu-group-header .chevron { font-size: 0.7rem; color: #6c757d; }
+
+.inv-menu .menu-group-header.category { cursor: default; }
+.inv-menu .header-toggle {
+    background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+    color: #6c757d; font-size: 0.7rem; display: inline-flex; align-items: center;
+}
+.inv-menu .parent-add {
+    margin-left: auto;
+    width: 1.3rem; height: 1.3rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 3px; color: #6c757d; text-decoration: none; font-weight: 700; font-size: 0.95rem;
+}
+.inv-menu .parent-add:hover { background: var(--accent-bg); color: var(--accent-dark); }
+
+.inv-menu .menu-group-items { padding: 0.15rem 0; }
+
+.inv-menu .menu-item.leaf {
+    display: flex; align-items: center; gap: 0.3rem;
+    padding: 0.16rem 0.45rem 0.16rem 1.25rem;
+    color: #212529; text-decoration: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-left: 3px solid transparent;
+    font-size: 0.76rem;
+}
+.inv-menu .menu-item.leaf .item-icon { font-size: 0.75rem; opacity: 0.7; }
+.inv-menu .menu-item.leaf:hover { background: #f2f4f5; color: var(--accent-dark); text-decoration: none; }
+.inv-menu .menu-item.leaf.active {
+    background: var(--accent-bg);
+    color: var(--accent-dark);
+    font-weight: 600;
+    border-left-color: var(--accent);
+}
+
+.inv-menu .menu-new-category {
+    display: flex; align-items: center; gap: 0.35rem; width: 100%;
+    margin-top: 0.15rem;
+    padding: 0.28rem 0.55rem;
+    background: none; border: none;
+    border-top: 1px solid #e9ecef;
+    color: var(--accent-dark); text-align: left;
+    font-size: 0.76rem; font-weight: 600; cursor: pointer;
+}
+.inv-menu .menu-new-category .item-icon { font-size: 0.8rem; opacity: 0.85; }
+.inv-menu .menu-new-category:hover { background: var(--accent-bg); }
+
+/* Summary / List (detail) view toggle */
+.inv-view-toggle { display: flex; margin-left: auto; }
+
+.inv-view-toggle button {
+    border: 1px solid var(--accent);
+    background: #fff;
+    color: var(--accent-dark);
+    padding: 0.1rem 0.5rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* Smaller toolbar controls + buttons */
+.inv-toolbar .form-control-sm,
+.inv-toolbar .form-select-sm {
+    font-size: 0.78rem;
+    padding: 0.15rem 0.4rem;
+}
+.inv-toolbar .btn-sm,
+.inv-grid-bar .form-select-sm {
+    font-size: 0.78rem;
+    padding: 0.18rem 0.5rem;
+}
+.inv-toolbar { gap: 0.4rem; margin-bottom: 0.5rem; }
+
+.inv-view-toggle button:first-child { border-radius: 4px 0 0 4px; }
+.inv-view-toggle button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+.inv-view-toggle button.active { background: var(--accent); color: #fff; }
+
+/* Detail (list) view = wide table with horizontal scroll */
+.inv-scroll-x { overflow-x: auto; }
+.inv-table-wide { min-width: 1100px; }
+
+/* Inline-editable grid (List view) — fits the container, no horizontal scroll */
+.inv-editing-as { display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.inv-editing-as label, .inv-editing-as span { white-space: nowrap; }
+.inv-editing-as .form-select-sm { max-width: 130px; }
+
+.inv-grid {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.inv-grid thead th {
+    padding: 0.3rem 0.3rem;
+    font-size: 0.63rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.inv-grid thead th.num-col { text-align: right; }
+.inv-grid td { padding: 0.05rem 0.15rem; }
+.inv-grid td.num-col { text-align: right; }
+
+/* Read-only cell text (List view when no editor is chosen) — clean ellipsis, no clipping */
+.inv-cell-ro {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.16rem 0.3rem;
+    font-size: 0.78rem;
+    color: #212529;
+}
+.inv-cell-ro.num { text-align: right; }
+
+.inv-cell-input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 0.12rem 0.25rem;
+    font-size: 0.78rem;
+    color: #212529;
+    background: transparent;
+}
+.inv-cell-input:hover:not(:disabled) { border-color: #dee2e6; }
+.inv-cell-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    background: #fff;
+    box-shadow: 0 0 0 2px var(--accent-bg);
+}
+.inv-cell-input:disabled { color: #495057; background: transparent; cursor: not-allowed; }
+.inv-cell-input.num { text-align: right; }
+
+/* Summary table */
+.inv-scroll {
+    max-height: calc(100vh - 15rem);
+    overflow: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.inv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.inv-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f8f9fa;
+    padding: 0.3rem 0.45rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.63rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6c757d;
+    border-bottom: 2px solid #dee2e6;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.inv-table thead th:hover { color: var(--accent); }
+.inv-table thead th.no-sort { cursor: default; }
+.inv-table thead th.no-sort:hover { color: #6c757d; }
+.inv-table thead th.num-col { text-align: right; }
+
+.inv-sort-icon { font-size: 0.65rem; margin-left: 0.15rem; }
+
+.inv-table tbody td {
+    padding: 0.22rem 0.45rem;
+    border-bottom: 1px solid #f0f0f0;
+    color: #212529;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.inv-row { cursor: pointer; transition: background 0.15s; }
+.inv-row:hover { background: #f8f9fa; }
+.inv-row.selected { background: var(--accent-bg); }
+.inv-cell-title { font-weight: 500; color: var(--accent-dark); }
+.inv-cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.inv-empty { padding: 2rem 1rem; text-align: center; color: #6c757d; }
+
+/* Badges / pills */
+.inv-badge {
+    display: inline-block;
+    padding: 0.13em 0.48em;
+    font-size: 0.68rem;
+    font-weight: 600;
+    border-radius: 3px;
+    color: #fff;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.inv-badge-asset { background: #455a64; }
+.inv-badge-consumable { background: #00897b; }
+.inv-badge-ok { background: #198754; }
+.inv-badge-low { background: #dc3545; }
+.inv-badge-warn { background: #fd7e14; }
+.inv-badge-muted { background: #6c757d; }
+
+/* Detail side panel */
+.inv-panel {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.inv-panel-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    background: #fbfcfd;
+}
+.inv-panel-empty-text { text-align: center; color: #adb5bd; font-size: 0.82rem; }
+.inv-panel-empty-icon { font-size: 1.6rem; opacity: 0.4; margin-bottom: 0.4rem; }
+
+.inv-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #dee2e6;
+    background: #f8f9fa;
+}
+
+.inv-panel-title { margin: 0; font-size: 0.95rem; font-weight: 600; color: #212529; }
+.inv-panel-sub { font-size: 0.76rem; color: #6c757d; margin-top: 0.1rem; }
+.inv-panel-body { padding: 0.5rem 1rem 1rem; }
+
+.inv-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6c757d;
+    margin: 0.8rem 0 0.3rem;
+}
+
+.inv-field {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.24rem 0;
+    border-bottom: 1px solid #f4f4f4;
+    font-size: 0.82rem;
+}
+
+.inv-field-label { color: #6c757d; flex-shrink: 0; }
+.inv-field-value { color: #212529; text-align: right; font-weight: 500; word-break: break-word; }
+
+.inv-qty-big { font-size: 1.5rem; font-weight: 700; color: var(--accent-dark); line-height: 1; }
+.inv-qty-unit { font-size: 0.86rem; font-weight: 500; color: #6c757d; }
+
+.inv-stock-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-top: 0.6rem;
+}
+
+.inv-activity {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+
+.inv-activity th, .inv-activity td {
+    padding: 0.2rem 0.35rem;
+    border-bottom: 1px solid #f0f0f0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.inv-activity th { color: #6c757d; font-weight: 600; font-size: 0.62rem; text-transform: uppercase; }
+
+/* Create / edit form */
+.inv-form { max-width: 1000px; }
+
+/* Compact form controls to match the rest of the module */
+.inv-form .form-control,
+.inv-form .form-select,
+.inv-form textarea.form-control {
+    font-size: 0.84rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+}
+
+.inv-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.inv-form-header h2 { margin: 0; font-size: 1.05rem; }
+.inv-form-actions { display: flex; gap: 0.5rem; }
+
+.inv-form-section {
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 0.6rem 1rem 0.8rem;
+    margin-bottom: 0.75rem;
+}
+
+.inv-form-section > summary {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #495057;
+    cursor: pointer;
+    padding: 0.25rem 0;
+}
+
+.inv-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.35rem 1.25rem;
+    margin-top: 0.4rem;
+}
+
+@media (max-width: 900px) { .inv-form-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .inv-form-grid { grid-template-columns: 1fr; } }
+
+.inv-form-group { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: 0.5rem; }
+.inv-form-group.span-2 { grid-column: span 2; }
+.inv-form-group.span-3 { grid-column: 1 / -1; }
+
+.inv-form-group label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.inv-form-check { display: flex; align-items: center; gap: 0.4rem; margin-top: 1.3rem; font-size: 0.8rem; }
+
+.inv-kind-toggle { display: flex; gap: 0; margin-bottom: 0.9rem; }
+
+.inv-kind-toggle button {
+    border: 1px solid var(--accent);
+    background: #fff;
+    color: var(--accent-dark);
+    padding: 0.28rem 0.85rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.inv-kind-toggle button:first-child { border-radius: 6px 0 0 6px; }
+.inv-kind-toggle button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.inv-kind-toggle button.active { background: var(--accent); color: #fff; }
 
 /* ============================================
    Print Stylesheet

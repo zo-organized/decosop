@@ -14,15 +14,17 @@ public class DataCacheService
 {
     private readonly SopFileService _sopFile;
     private readonly DocumentService _doc;
+    private readonly InventoryService _inv;
     private readonly UserPreferenceService _prefs;
     private readonly AppDbContext _db;
     private readonly SemaphoreSlim _sem = new(1, 1);
 
-    public DataCacheService(SopFileService sopFile, DocumentService doc,
+    public DataCacheService(SopFileService sopFile, DocumentService doc, InventoryService inv,
         UserPreferenceService prefs, AppDbContext db)
     {
         _sopFile = sopFile;
         _doc = doc;
+        _inv = inv;
         _prefs = prefs;
         _db = db;
     }
@@ -195,8 +197,106 @@ public class DataCacheService
     public void InvalidateDoc() { _docTree = null; _docFavCats = null; _docFavDocs = null; _docCatPrefs = null; _docDocPrefs = null; }
     public void InvalidateDocFavorites() { _docFavCats = null; _docFavDocs = null; _docCatPrefs = null; _docDocPrefs = null; }
 
+    // ---- Inventory ----
+    private List<InventoryCategory>? _invTree;
+    private List<InventoryCategory>? _invFavCats;
+    private List<InventoryItem>? _invFavItems;
+    private Dictionary<int, UserPreference>? _invCatPrefs;
+    private Dictionary<int, UserPreference>? _invItemPrefs;
+    private List<InventoryStaff>? _invStaff;
+    private List<InventoryLocation>? _invLocations;
+
+    public async Task<List<InventoryCategory>> GetInvTreeAsync()
+    {
+        if (_invTree is not null) return _invTree;
+        await _sem.WaitAsync();
+        try { return _invTree ??= await _inv.GetCategoryTreeAsync(); }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<Dictionary<int, UserPreference>> GetInvCategoryPrefsAsync()
+    {
+        if (_invCatPrefs is not null) return _invCatPrefs;
+        await _sem.WaitAsync();
+        try { return _invCatPrefs ??= await _prefs.GetAllForTypeAsync(nameof(InventoryCategory)); }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<Dictionary<int, UserPreference>> GetInvItemPrefsAsync()
+    {
+        if (_invItemPrefs is not null) return _invItemPrefs;
+        await _sem.WaitAsync();
+        try { return _invItemPrefs ??= await _prefs.GetAllForTypeAsync(nameof(InventoryItem)); }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<List<InventoryStaff>> GetInvStaffAsync()
+    {
+        if (_invStaff is not null) return _invStaff;
+        await _sem.WaitAsync();
+        try { return _invStaff ??= await _inv.GetStaffAsync(); }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<List<InventoryLocation>> GetInvLocationsAsync()
+    {
+        if (_invLocations is not null) return _invLocations;
+        await _sem.WaitAsync();
+        try { return _invLocations ??= await _inv.GetLocationsAsync(); }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<List<InventoryCategory>> GetInvFavoriteCategoriesAsync()
+    {
+        if (_invFavCats is not null) return _invFavCats;
+        await _sem.WaitAsync();
+        try
+        {
+            if (_invFavCats is not null) return _invFavCats;
+            var favIds = await _prefs.GetFavoritedIdsAsync(nameof(InventoryCategory));
+            if (favIds.Count == 0) { _invFavCats = []; return _invFavCats; }
+            var favIdSet = new HashSet<int>(favIds);
+            var tree = _invTree ?? await _inv.GetCategoryTreeAsync();
+            _invTree ??= tree;
+            _invFavCats = FlattenTree<InventoryCategory>(tree, c => c.Children)
+                .Where(c => favIdSet.Contains(c.Id)).ToList();
+            return _invFavCats;
+        }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<List<InventoryItem>> GetInvFavoriteItemsAsync()
+    {
+        if (_invFavItems is not null) return _invFavItems;
+        await _sem.WaitAsync();
+        try
+        {
+            if (_invFavItems is not null) return _invFavItems;
+            var favIds = await _prefs.GetFavoritedIdsAsync(nameof(InventoryItem));
+            if (favIds.Count == 0) { _invFavItems = []; return _invFavItems; }
+            _invFavItems = await _inv.GetItemsByIdsAsync(favIds);
+            return _invFavItems;
+        }
+        finally { _sem.Release(); }
+    }
+
+    public async Task<InventoryCategory?> FindInvCategoryAsync(int id)
+    {
+        var tree = await GetInvTreeAsync();
+        return FindInTree<InventoryCategory>(tree, id, c => c.Id, c => c.Children);
+    }
+
+    public async Task<List<(int Id, string Name)>> GetInvBreadcrumbsAsync(int categoryId)
+    {
+        var cat = await FindInvCategoryAsync(categoryId);
+        return BuildBreadcrumbs(cat, c => c.Parent, c => (c.Id, c.Name));
+    }
+
+    public void InvalidateInv() { _invTree = null; _invFavCats = null; _invFavItems = null; _invCatPrefs = null; _invItemPrefs = null; _invStaff = null; _invLocations = null; }
+    public void InvalidateInvFavorites() { _invFavCats = null; _invFavItems = null; _invCatPrefs = null; _invItemPrefs = null; }
+
     // ---- Invalidate all ----
-    public void InvalidateAll() { InvalidateSop(); InvalidateDoc(); }
+    public void InvalidateAll() { InvalidateSop(); InvalidateDoc(); InvalidateInv(); }
 
     /// <summary>
     /// Runs an async action under the shared semaphore so it never overlaps with

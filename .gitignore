@@ -78,3 +78,6 @@ RELEASE_CONTEXT.md
 
 # Playwright MCP test artifacts
 .playwright-mcp/
+
+# Machine-local config (holds Azure SQL inventory connection string / secrets)
+appsettings.Local.json

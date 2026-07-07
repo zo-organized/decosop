@@ -1,6 +1,6 @@
 namespace DecoSOP.Services;
 
-public enum CategoryType { Sop, Document }
+public enum CategoryType { Sop, Document, Inventory }
 public enum ItemKind { Category, Document }
 
 /// <summary>

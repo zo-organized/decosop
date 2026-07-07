@@ -1,0 +1,189 @@
+@using DecoSOP.Services
+@using DecoSOP.Models
+@inject InventoryService InvService
+@inject DataCacheService Cache
+@inject UserPreferenceService Prefs
+
+@if (Item is null)
+{
+    <div class="inv-panel inv-panel-empty">
+        <div class="inv-panel-empty-text">
+            <div class="inv-panel-empty-icon">&#128230;</div>
+            Select an item to view details
+        </div>
+    </div>
+}
+else
+{
+    <div class="inv-panel">
+        <div class="inv-panel-header">
+            <div>
+                <h3 class="inv-panel-title">@Item.Title</h3>
+                <div class="inv-panel-sub">
+                    <span class="inv-badge @(Item.Kind == InventoryKind.Consumable ? "inv-badge-consumable" : "inv-badge-asset")">
+                        @(Item.Kind == InventoryKind.Consumable ? "Supply" : "Asset")
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(Item.ItemType)) { <span>&nbsp;@Item.ItemType</span> }
+                </div>
+            </div>
+            <div style="display:flex; gap:0.25rem; align-items:center; flex-shrink:0;">
+                <button class="btn-star @(isFav ? "starred" : "")" title="Favorite" @onclick="ToggleFav">@(isFav ? "★" : "☆")</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OnEdit.InvokeAsync(Item)">Edit</button>
+                <button class="btn btn-sm btn-outline-secondary" title="Close" @onclick="() => OnClose.InvokeAsync()">&times;</button>
+            </div>
+        </div>
+        <div class="inv-panel-body">
+            @RenderField("Category", Item.Category?.Name)
+            @RenderField("Location", Item.Location?.Name)
+            @RenderField("Barcode", Item.Barcode)
+            @RenderField("Lot #", Item.Lot)
+
+            @if (Item.Kind == InventoryKind.Consumable)
+            {
+                <div class="inv-section-title">Stock</div>
+                <div>
+                    <span class="inv-qty-big">@Qty(Item.QuantityOnHand)</span>
+                    <span class="inv-qty-unit">@Item.Unit</span>
+                </div>
+                @RenderField("Reorder at", Item.ReorderPoint is decimal rp ? $"{Qty(rp)} {Item.Unit}" : null)
+                @RenderField("Expires", Item.ExpirationDate?.ToShortDateString())
+
+                <div class="inv-stock-controls">
+                    <div class="inv-form-group" style="margin:0;">
+                        <label>Who</label>
+                        <select class="form-select form-select-sm" @bind="stockStaff" style="min-width:110px;">
+                            <option value="">— name —</option>
+                            @foreach (var s in Staff) { <option value="@s.Name">@s.Name</option> }
+                        </select>
+                    </div>
+                    <div class="inv-form-group" style="margin:0;">
+                        <label>Qty</label>
+                        <input type="number" step="any" class="form-control form-control-sm" style="width:75px;" @bind="stockQty" />
+                    </div>
+                    <button class="btn btn-sm btn-success" @onclick='() => Move("Received", stockQty)'>Receive</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick='() => Move("Used", -stockQty)'>Use</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="SetCount">Set count</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(stockError)) { <div class="text-danger small mt-1">@stockError</div> }
+            }
+            else
+            {
+                <div class="inv-section-title">Details</div>
+                @RenderField("Status", Item.Status)
+                @RenderField("Identifier / SN", Item.Identifier)
+                @RenderField("Brand", Item.Brand)
+                @RenderField("Model", Item.Model)
+                @RenderField("Manufacturer", Item.Manufacturer)
+                @RenderField("Current value", Item.CurrentValue?.ToString("C2"))
+
+                <div class="inv-section-title">Purchase &amp; safety</div>
+                @RenderField("Price", Item.Price?.ToString("C2"))
+                @RenderField("Purchased", Item.PurchaseDate?.ToShortDateString())
+                @RenderField("Seller", Item.Seller)
+                @RenderField("Warranty", Item.WarrantyInfo)
+                @RenderField("Warranty exp.", Item.WarrantyExpiration?.ToShortDateString())
+                @RenderField("SDS on file", Item.SdsOnFile ? "Yes" : null)
+                @RenderField("Use", Item.Use)
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Item.Description))
+            {
+                <div class="inv-section-title">Notes</div>
+                <div class="small">@Item.Description</div>
+            }
+
+            <div class="inv-section-title">Activity</div>
+            @if (activity.Count == 0)
+            {
+                <div class="text-muted small">No activity yet.</div>
+            }
+            else
+            {
+                <table class="inv-activity">
+                    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Qty</th></tr></thead>
+                    <tbody>
+                        @foreach (var a in activity)
+                        {
+                            <tr>
+                                <td>@a.Timestamp.ToLocalTime().ToString("MM/dd HH:mm")</td>
+                                <td>@a.StaffName</td>
+                                <td>@a.Action</td>
+                                <td>@(a.QtyDelta is decimal d ? (d >= 0 ? "+" : "") + Qty(d) : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            <div class="text-muted small" style="margin-top:0.6rem;">
+                Updated @Item.UpdatedAt.ToLocalTime().ToString("g")@(string.IsNullOrWhiteSpace(Item.LastUpdatedBy) ? "" : $" by {Item.LastUpdatedBy}")
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public InventoryItem? Item { get; set; }
+    [Parameter] public List<InventoryStaff> Staff { get; set; } = [];
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<InventoryItem> OnEdit { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<InventoryActivity> activity = [];
+    private bool isFav;
+    private int loadedId = -1;
+    private string stockStaff = "";
+    private decimal stockQty = 1;
+    private string? stockError;
+
+    private RenderFragment? RenderField(string label, string? value) => string.IsNullOrWhiteSpace(value) ? null : @<div class="inv-field"><span class="inv-field-label">@label</span><span class="inv-field-value">@value</span></div>;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Item is null) { activity = []; loadedId = -1; return; }
+        if (Item.Id == loadedId) return;
+        loadedId = Item.Id;
+        stockError = null;
+        activity = await Cache.RunExclusiveAsync(() => InvService.GetActivityAsync(Item.Id));
+        var prefs = await Cache.GetInvItemPrefsAsync();
+        isFav = prefs.TryGetValue(Item.Id, out var p) && p.IsFavorited;
+    }
+
+    private async Task ToggleFav()
+    {
+        if (Item is null) return;
+        await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(InventoryItem), Item.Id));
+        Cache.InvalidateInvFavorites();
+        var prefs = await Cache.GetInvItemPrefsAsync();
+        isFav = prefs.TryGetValue(Item.Id, out var p) && p.IsFavorited;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Move(string action, decimal delta)
+    {
+        stockError = null;
+        if (Item is null) return;
+        if (string.IsNullOrWhiteSpace(stockStaff)) { stockError = "Pick your name first."; return; }
+        if (stockQty <= 0) { stockError = "Enter a quantity above zero."; return; }
+        var updated = await Cache.RunExclusiveAsync(() => InvService.AdjustStockAsync(Item.Id, delta, stockStaff, action, null));
+        await AfterStock(updated);
+    }
+
+    private async Task SetCount()
+    {
+        stockError = null;
+        if (Item is null) return;
+        if (string.IsNullOrWhiteSpace(stockStaff)) { stockError = "Pick your name first."; return; }
+        if (stockQty < 0) { stockError = "Count can't be negative."; return; }
+        var updated = await Cache.RunExclusiveAsync(() => InvService.SetCountAsync(Item.Id, stockQty, stockStaff, null));
+        await AfterStock(updated);
+    }
+
+    private async Task AfterStock(InventoryItem? updated)
+    {
+        if (updated is not null && Item is not null) Item.QuantityOnHand = updated.QuantityOnHand;
+        if (Item is not null) activity = await Cache.RunExclusiveAsync(() => InvService.GetActivityAsync(Item.Id));
+        await OnChanged.InvokeAsync();
+    }
+
+    private static string Qty(decimal? q) => (q ?? 0).ToString("0.###");
+}

@@ -4,6 +4,7 @@
 @inject UserPreferenceService Prefs
 @inject SopFileService SopFileService
 @inject DocumentService DocService
+@inject InventoryService InvService
 @inject DataCacheService Cache
 @inject IJSRuntime JS
 @implements IDisposable
@@ -43,6 +44,15 @@
             <button class="context-menu-item" @onclick="Rename">
                 Rename
             </button>
+            @if (MenuState.Type == CategoryType.Inventory)
+            {
+                <button class="context-menu-item" @onclick="NewSubcategory">
+                    New subcategory…
+                </button>
+                <button class="context-menu-item context-menu-item-danger" @onclick="Delete">
+                    Delete
+                </button>
+            }
         }
     </div>
 }
@@ -94,6 +104,8 @@
         (CategoryType.Sop, ItemKind.Document) => nameof(SopFile),
         (CategoryType.Document, ItemKind.Category) => nameof(DocumentCategory),
         (CategoryType.Document, ItemKind.Document) => nameof(OfficeDocument),
+        (CategoryType.Inventory, ItemKind.Category) => nameof(InventoryCategory),
+        (CategoryType.Inventory, ItemKind.Document) => nameof(InventoryItem),
         _ => throw new InvalidOperationException()
     };
 
@@ -143,8 +155,10 @@
             {
                 if (MenuState.Type == CategoryType.Sop)
                     await Cache.RunExclusiveAsync(() => SopFileService.RenameCategoryAsync(MenuState.CategoryId, newName));
-                else
+                else if (MenuState.Type == CategoryType.Document)
                     await Cache.RunExclusiveAsync(() => DocService.RenameCategoryAsync(MenuState.CategoryId, newName));
+                else
+                    await Cache.RunExclusiveAsync(() => InvService.RenameCategoryAsync(MenuState.CategoryId, newName));
 
                 await MenuState.NotifyCategoryModified();
             }
@@ -152,6 +166,55 @@
             {
                 await JS.InvokeVoidAsync("alert", $"Could not rename the folder. {ex.Message}");
             }
+        }
+    }
+
+    private async Task NewSubcategory()
+    {
+        var parentId = MenuState.CategoryId;
+        var parentName = MenuState.CategoryName;
+
+        var name = await JS.InvokeAsync<string?>("prompt", $"New subcategory under \"{parentName}\":");
+        MenuState.Hide();
+
+        if (MenuState.Type != CategoryType.Inventory) return;
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (name.Trim().Length > 200)
+        {
+            await JS.InvokeVoidAsync("alert", "Name must be 200 characters or fewer.");
+            return;
+        }
+
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.CreateCategoryAsync(name, parentId));
+            Cache.InvalidateInv();
+            await MenuState.NotifyCategoryModified();
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Could not create the subcategory. {ex.Message}");
+        }
+    }
+
+    private async Task Delete()
+    {
+        MenuState.Hide();
+        if (MenuState.Type != CategoryType.Inventory) return;
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm", $"Delete the category \"{MenuState.CategoryName}\"? It must be empty (no items or subcategories).");
+        if (!confirmed) return;
+
+        try
+        {
+            await Cache.RunExclusiveAsync(() => InvService.DeleteCategoryAsync(MenuState.CategoryId));
+            Cache.InvalidateInv();
+            await MenuState.NotifyCategoryModified();
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Could not delete the category. {ex.Message}");
         }
     }
 

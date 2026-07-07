@@ -1,11 +1,16 @@
 using DecoSOP.Components;
 using DecoSOP.Data;
+using DecoSOP.Models;
 using DecoSOP.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseWindowsService();
+
+// Machine-local overrides (kept out of source control) — holds the Azure SQL "InventoryDb"
+// connection string. Copy appsettings.Local.template.json → appsettings.Local.json and fill it in.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 // Read port from port.config if it exists (written by installer), otherwise default to 5098
 var port = "5098";
@@ -53,11 +58,19 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"), ServiceLifetime.Scoped);
 
+// Inventory module → Azure SQL (its own context). SOPs/Docs/preferences stay in the local SQLite AppDbContext above.
+var inventoryConn = builder.Configuration.GetConnectionString("InventoryDb")
+    ?? throw new InvalidOperationException(
+        "Connection string 'InventoryDb' is not configured. Add it under \"ConnectionStrings\" in appsettings.");
+builder.Services.AddDbContext<InventoryDbContext>(options =>
+    options.UseSqlServer(inventoryConn, sql => sql.EnableRetryOnFailure()));
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientIdentityService>();
 builder.Services.AddScoped<UserPreferenceService>();
 builder.Services.AddScoped<SopFileService>();
 builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
 builder.Services.AddSingleton<UpdateService>();
@@ -304,6 +317,41 @@ using (var scope = app.Services.CreateScope())
     // Ensure uploads directories exist
     DocumentService.GetUploadDirectory();
     SopFileService.GetUploadDirectory();
+
+    // Provision + seed the Azure SQL inventory database (schema comes from the EF model).
+    try
+    {
+        var invDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+        await invDb.Database.EnsureCreatedAsync();
+
+        if (!await invDb.InventoryLocations.AnyAsync())
+        {
+            invDb.InventoryLocations.AddRange(
+                new InventoryLocation { Name = "Op 1", SortOrder = 0 },
+                new InventoryLocation { Name = "Op 2", SortOrder = 1 },
+                new InventoryLocation { Name = "Op 3", SortOrder = 2 },
+                new InventoryLocation { Name = "Sterilization", SortOrder = 3 },
+                new InventoryLocation { Name = "Storage", SortOrder = 4 },
+                new InventoryLocation { Name = "Front Office", SortOrder = 5 });
+
+            invDb.InventoryStaff.Add(new InventoryStaff { Name = "Front Desk", SortOrder = 0 });
+
+            var operatory = new InventoryCategory { Name = "Operatory Equipment", SortOrder = 0 };
+            operatory.Children.Add(new InventoryCategory { Name = "Handpieces", SortOrder = 0 });
+            invDb.InventoryCategories.AddRange(
+                operatory,
+                new InventoryCategory { Name = "Sterilization", SortOrder = 1 },
+                new InventoryCategory { Name = "Consumables / Chairside", SortOrder = 2 },
+                new InventoryCategory { Name = "Office / Admin", SortOrder = 3 });
+
+            await invDb.SaveChangesAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Inventory");
+        logger.LogError(ex, "Inventory (Azure SQL) provisioning/seed failed. The inventory section may not work until the database is reachable.");
+    }
 }
 
 if (!app.Environment.IsDevelopment())
