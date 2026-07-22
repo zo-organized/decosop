@@ -3,6 +3,7 @@
 @using DecoSOP.Models
 @using Microsoft.AspNetCore.Components.Forms
 @inject SopFileService SopFileService
+@inject DataCacheService Cache
 @inject NavigationManager Nav
 
 <div data-mode="sop"></div>
@@ -76,7 +77,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var allCats = await SopFileService.GetAllCategoriesAsync();
+        var allCats = await Cache.RunExclusiveAsync(() => SopFileService.GetAllCategoriesAsync());
         var lookup = allCats.ToDictionary(c => c.Id);
         categoryOptions = allCats.Select(c =>
         {
@@ -130,7 +131,8 @@
 
         try
         {
-            var doc = await SopFileService.UploadDocumentAsync(selectedCategoryId, title, selectedFile);
+            var doc = await Cache.RunExclusiveAsync(
+                () => SopFileService.UploadDocumentAsync(selectedCategoryId, title, selectedFile));
             Nav.NavigateTo($"/sops/{doc.Id}");
         }
         catch (Exception ex)

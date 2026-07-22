@@ -3,6 +3,7 @@
 @using DecoSOP.Models
 @using Microsoft.AspNetCore.Components.Forms
 @inject DocumentService DocService
+@inject DataCacheService Cache
 @inject NavigationManager Nav
 
 <PageTitle>Upload Document - DecoSOP</PageTitle>
@@ -75,7 +76,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var allCats = await DocService.GetAllCategoriesAsync();
+        var allCats = await Cache.RunExclusiveAsync(() => DocService.GetAllCategoriesAsync());
         var lookup = allCats.ToDictionary(c => c.Id);
         categoryOptions = allCats.Select(c =>
         {
@@ -130,7 +131,8 @@
 
         try
         {
-            var doc = await DocService.UploadDocumentAsync(selectedCategoryId, title, selectedFile);
+            var doc = await Cache.RunExclusiveAsync(
+                () => DocService.UploadDocumentAsync(selectedCategoryId, title, selectedFile));
             Nav.NavigateTo($"/documents/{doc.Id}");
         }
         catch (Exception ex)

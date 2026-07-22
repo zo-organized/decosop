@@ -33,6 +33,14 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Compress dynamic responses (the initial rendered HTML document + file-download/preview API).
+// Static assets (blazor JS/framework, wwwroot) are already served pre-compressed by MapStaticAssets.
+builder.Services.AddResponseCompression(o =>
+{
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+});
+
 // In development, use project root so import scripts and the app share the same DB.
 // In production (Windows Service), use the exe directory.
 var dataDir = builder.Environment.IsDevelopment()
@@ -53,10 +61,13 @@ if (folderSync.Enabled)
     DocumentService.OpenBase = folderSync.Doc.OpenBase;
 }
 
+// Shared interceptor enables WAL + a busy_timeout on every SQLite connection so concurrent
+// reads/writes (user circuits + the folder-sync background writer) don't hit "database is locked".
+var sqlitePragmas = new DecoSOP.Data.SqlitePragmaInterceptor();
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"));
+    options.UseSqlite($"Data Source={dbPath}").AddInterceptors(sqlitePragmas));
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"), ServiceLifetime.Scoped);
+    options.UseSqlite($"Data Source={dbPath}").AddInterceptors(sqlitePragmas), ServiceLifetime.Scoped);
 
 // Inventory module → Azure SQL (its own context). SOPs/Docs/preferences stay in the local SQLite AppDbContext above.
 var inventoryConn = builder.Configuration.GetConnectionString("InventoryDb")
@@ -89,6 +100,15 @@ using (var scope = app.Services.CreateScope())
     // Schema migrations for existing databases (EnsureCreated only creates new DBs)
     var conn = db.Database.GetDbConnection();
     await conn.OpenAsync();
+
+    // Enable WAL once — it persists in the DB file header, so every later connection opens in WAL
+    // automatically (readers don't block the single writer). Per-connection busy_timeout is handled
+    // by SqlitePragmaInterceptor. Setting WAL per-connection instead would be needlessly expensive.
+    using (var walCmd = conn.CreateCommand())
+    {
+        walCmd.CommandText = "PRAGMA journal_mode=WAL;";
+        await walCmd.ExecuteNonQueryAsync();
+    }
 
     // One-time removal of the legacy Web SOPs / Web Docs modules: back up the DB,
     // drop their tables, clean orphaned preferences, and reclaim space. Gated by a
@@ -353,6 +373,8 @@ using (var scope = app.Services.CreateScope())
         logger.LogError(ex, "Inventory (Azure SQL) provisioning/seed failed. The inventory section may not work until the database is reachable.");
     }
 }
+
+app.UseResponseCompression();
 
 if (!app.Environment.IsDevelopment())
 {

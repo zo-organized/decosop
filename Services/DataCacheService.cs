@@ -89,6 +89,7 @@ public class DataCacheService
             var favIds = await _prefs.GetFavoritedIdsAsync(nameof(SopFile));
             if (favIds.Count == 0) { _sopFavDocs = []; return _sopFavDocs; }
             _sopFavDocs = await _db.SopFiles
+                .AsNoTracking()
                 .Include(d => d.Category)
                 .Where(d => favIds.Contains(d.Id))
                 .OrderBy(d => d.Title)
@@ -173,6 +174,7 @@ public class DataCacheService
             var favIds = await _prefs.GetFavoritedIdsAsync(nameof(OfficeDocument));
             if (favIds.Count == 0) { _docFavDocs = []; return _docFavDocs; }
             _docFavDocs = await _db.OfficeDocuments
+                .AsNoTracking()
                 .Include(d => d.Category)
                 .Where(d => favIds.Contains(d.Id))
                 .OrderBy(d => d.Title)

@@ -44,6 +44,7 @@ public class SopFileService
     public async Task<List<SopCategory>> GetCategoryTreeAsync()
     {
         var all = await _db.SopCategories
+            .AsNoTrackingWithIdentityResolution() // no tracking, but keep cross-entity Parent/Children fixup
             .Include(c => c.Documents.OrderBy(d => d.SortOrder))
             .OrderBy(c => c.SortOrder)
             .ToListAsync();
@@ -291,6 +292,7 @@ public class SopFileService
 
         var term = query.Trim().ToLower();
         return await _db.SopFiles
+            .AsNoTracking()
             .Include(d => d.Category)
             .Where(d => d.Title.ToLower().Contains(term)
                      || d.FileName.ToLower().Contains(term))

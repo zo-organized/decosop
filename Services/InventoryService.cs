@@ -5,9 +5,11 @@ using Microsoft.EntityFrameworkCore;
 namespace DecoSOP.Services;
 
 /// <summary>
-/// CRUD + stock/audit operations for the DB-native inventory module (unified assets + consumables).
-/// Follows the DocumentService pattern (scoped, single AppDbContext). Low-stock/expiring filters run
-/// in memory because SQLite stores decimals as TEXT and can't compare them in SQL — the dataset is tiny.
+/// CRUD + stock/audit operations for the DB-native inventory module (unified assets + consumables),
+/// backed by Azure SQL (<see cref="InventoryDbContext"/>). Read queries use AsNoTracking so cached
+/// results don't pin the scoped context's change-tracker for the circuit lifetime; the save paths all
+/// re-fetch the target row via FindAsync, so they're unaffected. Low-stock/expiring predicates run in
+/// SQL (SQL Server compares decimals/dates natively — the old in-memory filter was a SQLite workaround).
 /// </summary>
 public class InventoryService
 {
@@ -28,6 +30,7 @@ public class InventoryService
     public async Task<List<InventoryCategory>> GetCategoryTreeAsync()
     {
         var all = await _db.InventoryCategories
+            .AsNoTrackingWithIdentityResolution() // no tracking, but keep cross-entity Parent/Children fixup
             .Include(c => c.Items.OrderBy(i => i.SortOrder))
             .OrderBy(c => c.SortOrder)
             .ToListAsync();
@@ -120,6 +123,7 @@ public class InventoryService
         int? categoryId = null, int? locationId = null, InventoryKind? kind = null, string? search = null)
     {
         var q = _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category)
             .Include(i => i.Location)
             .AsQueryable();
@@ -146,6 +150,7 @@ public class InventoryService
 
     public async Task<InventoryItem?> GetItemAsync(int id)
         => await _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category)
             .Include(i => i.Location)
             .FirstOrDefaultAsync(i => i.Id == id);
@@ -155,6 +160,7 @@ public class InventoryService
     {
         if (ids.Count == 0) return [];
         return await _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category)
             .Where(i => ids.Contains(i.Id))
             .OrderBy(i => i.Title)
@@ -264,31 +270,31 @@ public class InventoryService
 
     // --- Queries ---
 
-    /// <summary>Consumables at or below their reorder point (filtered in memory — SQLite can't compare TEXT decimals).</summary>
+    /// <summary>Consumables at or below their reorder point (filtered in SQL — SQL Server compares decimals natively).</summary>
     public async Task<List<InventoryItem>> GetLowStockAsync()
-    {
-        var consumables = await _db.InventoryItems
+        => await _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category).Include(i => i.Location)
-            .Where(i => i.Kind == InventoryKind.Consumable && i.ReorderPoint != null)
-            .ToListAsync();
-        return consumables
-            .Where(i => (i.QuantityOnHand ?? 0) <= i.ReorderPoint!.Value)
+            .Where(i => i.Kind == InventoryKind.Consumable
+                && i.ReorderPoint != null
+                && (i.QuantityOnHand ?? 0) <= i.ReorderPoint!.Value)
             .OrderBy(i => i.Title)
-            .ToList();
-    }
+            .ToListAsync();
 
     /// <summary>Consumables expiring within <paramref name="days"/> days, including already-expired.</summary>
     public async Task<List<InventoryItem>> GetExpiringAsync(int days = 30)
     {
-        var cutoff = DateTime.UtcNow.Date.AddDays(days);
-        var items = await _db.InventoryItems
+        // Half-open upper bound (< cutoff+1 day) so the whole cutoff calendar day is included, without
+        // relying on DateTime.Date translation; no lower bound keeps already-expired items in the result.
+        var cutoffExclusive = DateTime.UtcNow.Date.AddDays(days + 1);
+        return await _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category).Include(i => i.Location)
-            .Where(i => i.Kind == InventoryKind.Consumable && i.ExpirationDate != null)
-            .ToListAsync();
-        return items
-            .Where(i => i.ExpirationDate!.Value.Date <= cutoff)
+            .Where(i => i.Kind == InventoryKind.Consumable
+                && i.ExpirationDate != null
+                && i.ExpirationDate!.Value < cutoffExclusive)
             .OrderBy(i => i.ExpirationDate)
-            .ToList();
+            .ToListAsync();
     }
 
     public async Task<InventoryItem?> LookupByBarcodeAsync(string code)
@@ -296,12 +302,14 @@ public class InventoryService
         if (string.IsNullOrWhiteSpace(code)) return null;
         var c = code.Trim();
         return await _db.InventoryItems
+            .AsNoTracking()
             .Include(i => i.Category).Include(i => i.Location)
             .FirstOrDefaultAsync(i => i.Barcode == c);
     }
 
     public async Task<List<InventoryActivity>> GetActivityAsync(int itemId, int take = 50)
         => await _db.InventoryActivities
+            .AsNoTracking()
             .Where(a => a.ItemId == itemId)
             .OrderByDescending(a => a.Timestamp).ThenByDescending(a => a.Id)
             .Take(take)
@@ -326,7 +334,7 @@ public class InventoryService
 
     public async Task<List<InventoryStaff>> GetStaffAsync(bool activeOnly = true)
     {
-        var q = _db.InventoryStaff.AsQueryable();
+        var q = _db.InventoryStaff.AsNoTracking().AsQueryable();
         if (activeOnly) q = q.Where(s => s.IsActive);
         return await q.OrderBy(s => s.SortOrder).ThenBy(s => s.Name).ToListAsync();
     }
@@ -365,7 +373,7 @@ public class InventoryService
 
     public async Task<List<InventoryLocation>> GetLocationsAsync(bool activeOnly = true)
     {
-        var q = _db.InventoryLocations.AsQueryable();
+        var q = _db.InventoryLocations.AsNoTracking().AsQueryable();
         if (activeOnly) q = q.Where(l => l.IsActive);
         return await q.OrderBy(l => l.SortOrder).ThenBy(l => l.Name).ToListAsync();
     }
