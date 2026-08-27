@@ -170,6 +170,10 @@
                 </button>
                 <span class="text-muted small">Rebuilding re-reads every document. It runs in the background.</span>
             </div>
+            @if (rebuildMessage is not null)
+            {
+                <div class="mt-2 small @(rebuildMessage.StartsWith("Rebuild failed") ? "text-danger" : "text-success")">@rebuildMessage</div>
+            }
         }
     </div>
 
@@ -316,14 +320,24 @@
         }
     }
 
+    private string? rebuildMessage;
+
     private async Task RebuildIndex()
     {
         isRebuilding = true;
+        rebuildMessage = null;
         try
         {
-            await SearchDb.ResetAsync();
-            Indexer.RequestRescan();
+            // Goes through the indexer so it cannot drop the tables while a pass is writing.
+            await Indexer.RebuildAsync();
             await RefreshIndexStats();
+            rebuildMessage = "Index cleared. Rebuilding in the background — search works while it runs.";
+        }
+        catch (Exception ex)
+        {
+            // A locked or read-only index file used to fail silently, leaving the button looking
+            // like it had worked.
+            rebuildMessage = $"Rebuild failed: {ex.Message}";
         }
         finally
         {

@@ -32,7 +32,7 @@
     <div class="sidebar-search px-3 py-2">
         <input type="text" class="form-control form-control-sm" aria-label="Search SOPs and documents"
                placeholder="@searchPlaceholder"
-               @bind="searchQuery" @bind:event="oninput" @onkeyup="OnSearchKeyUp" />
+               @bind="searchQuery" @bind:event="oninput" @bind:after="OnSearchChanged" @onkeyup="OnSearchKeyUp" />
     </div>
 
     @if (currentMode == "favorites")
@@ -418,6 +418,10 @@
 
     protected override void OnInitialized()
     {
+        // Seed from the URL on first render too, not just on navigation: a results page opened
+        // directly, bookmarked, or shared would otherwise show an empty box above its own results.
+        if (IsOnResults) searchQuery = QueryFromUrl(Nav.Uri);
+
         Nav.LocationChanged += OnLocationChanged;
         MenuState.OnCategoryModified += OnCategoryModified;
         MenuState.OnChange += StateHasChanged;
@@ -484,7 +488,13 @@
                 // Keep the box populated while the results it produced are on screen —
                 // clearing it here would wipe the query the moment our own navigation landed.
                 // Opening one of the results, or going anywhere else, resets it.
-                if (!IsOnResults)
+                if (IsOnResults)
+                {
+                    // A results URL opened directly, shared, or reloaded must show its query in
+                    // the box — otherwise the only control on the page contradicts the screen.
+                    searchQuery = QueryFromUrl(Nav.Uri);
+                }
+                else
                 {
                     searchQuery = string.Empty;
                     invSearchResults = [];
@@ -505,6 +515,8 @@
 
     public void Dispose()
     {
+        debounceTimer?.Stop();
+        debounceTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         Nav.LocationChanged -= OnLocationChanged;
@@ -744,22 +756,37 @@
     /// Put the current query's results in the main view. Replaces rather than pushes, so typing
     /// a word does not leave a history entry per keystroke to back out through.
     /// </summary>
+    private static string QueryFromUrl(string uri)
+    {
+        try
+        {
+            var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(uri).Query);
+            return query.TryGetValue("q", out var q) ? q.ToString() : string.Empty;
+        }
+        catch (UriFormatException) { return string.Empty; }
+    }
+
     private void ShowResults()
     {
         if (string.IsNullOrWhiteSpace(searchQuery)) return;
         Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}&from={currentMode}", replace: IsOnResults);
     }
 
-    private async Task OnSearchKeyUp(KeyboardEventArgs e)
+    /// <summary>Enter commits immediately rather than waiting out the debounce.</summary>
+    private void OnSearchKeyUp(KeyboardEventArgs e)
     {
-        // Enter commits immediately rather than waiting out the debounce.
-        if (e.Key == "Enter" && currentMode != "inv")
-        {
-            debounceTimer?.Stop();
-            ShowResults();
-            return;
-        }
+        if (e.Key != "Enter" || currentMode == "inv") return;
+        debounceTimer?.Stop();
+        ShowResults();
+    }
 
+    /// <summary>
+    /// Runs after every edit to the box, via @bind:after. Deliberately not tied to keyup: the
+    /// browser's built-in clear button, pasting with the mouse, and drag-and-drop all change the
+    /// value without ever producing a keystroke.
+    /// </summary>
+    private async Task OnSearchChanged()
+    {
         debounceTimer?.Stop();
         debounceTimer?.Dispose();
 

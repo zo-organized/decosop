@@ -166,6 +166,42 @@ public sealed class SearchIndexService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Record files as queued before any work starts, so progress has a real denominator.
+    /// Without this nothing ever holds Status='pending', Total always equals Done, and the
+    /// completion figure reads 100% throughout a build — including on a first run where it is
+    /// the one number anyone cares about.
+    /// </summary>
+    public async Task MarkPendingAsync(
+        IReadOnlyList<(string Module, int FileId, string StoredPath)> files, CancellationToken ct = default)
+    {
+        if (files.Count == 0) return;
+
+        await using var conn = await _db.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = (SqliteTransaction)tx;
+        cmd.CommandText = """
+            INSERT INTO IndexState (Module, FileId, StoredPath, Status)
+            VALUES (@module, @fileId, @path, 'pending')
+            ON CONFLICT(Module, FileId) DO UPDATE SET Status = 'pending'
+            """;
+        var pModule = cmd.Parameters.Add("@module", SqliteType.Text);
+        var pFileId = cmd.Parameters.Add("@fileId", SqliteType.Integer);
+        var pPath = cmd.Parameters.Add("@path", SqliteType.Text);
+
+        foreach (var (module, fileId, path) in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            pModule.Value = module;
+            pFileId.Value = fileId;
+            pPath.Value = path;
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     /// <summary>Drop a file from the index entirely — it was deleted from the library.</summary>
     public async Task RemoveAsync(string module, int fileId, CancellationToken ct = default)
     {

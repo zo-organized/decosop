@@ -5,6 +5,7 @@
 @inject SearchIndexService SearchIndex
 @inject SearchIndexBackgroundService Indexer
 @inject NavigationManager Nav
+@inject ILogger<Search> Logger
 @implements IDisposable
 
 <PageTitle>@(string.IsNullOrWhiteSpace(Query) ? "Search" : $"{Query} - Search") - DecoSOP</PageTitle>
@@ -28,9 +29,26 @@
             </div>
         }
     }
+    else if (searchError is not null)
+    {
+        <p class="lead">Search could not run.</p>
+        <div class="alert alert-warning">
+            <p class="mb-1">The search index could not be read just now.</p>
+            <p class="mb-0 small text-muted">
+                If this persists, rebuild the index from <a href="/settings">Settings</a>.
+                Browsing the folders on the left still works.
+            </p>
+        </div>
+    }
     else if (results is null || results.TotalCount == 0)
     {
-        <p class="lead">No results for <strong>@Query</strong>.</p>
+        <p class="lead">No results for <strong>@Query</strong>@(HasFilters ? " with these filters" : "").</p>
+        @if (HasFilters)
+        {
+            @* Without this the filter rows are a dead end: every chip reads 0, including the
+               one that would widen the search again. *@
+            <p><button class="btn btn-sm btn-outline-primary" @onclick="ClearFilters">Clear filters and search everything</button></p>
+        }
         <p class="text-muted">Try fewer words, or a different term. Scanned documents are searchable by their
             title until text recognition has run over them.</p>
     }
@@ -53,11 +71,11 @@
                 {
                     <div class="filter-group">
                         <span class="filter-label">Where</span>
-                        <button class="filter-chip @(Module is null ? "active" : "")" @onclick="() => SetFilter(module: null)">All</button>
+                        <button class="filter-chip @(Module is null ? "active" : "")" @onclick="() => SetModuleFilter(null)">All</button>
                         @foreach (var m in results.CountsByModule.OrderByDescending(k => k.Value))
                         {
                             <button class="filter-chip @(Module == m.Key ? "active" : "")"
-                                    @onclick="() => SetFilter(module: m.Key)">
+                                    @onclick="() => SetModuleFilter(m.Key)">
                                 @ModuleLabel(m.Key) <span class="filter-count">@m.Value</span>
                             </button>
                         }
@@ -68,11 +86,11 @@
                 {
                     <div class="filter-group">
                         <span class="filter-label">Type</span>
-                        <button class="filter-chip @(Ext is null ? "active" : "")" @onclick="() => SetFilter(ext: null)">All</button>
+                        <button class="filter-chip @(Ext is null ? "active" : "")" @onclick="() => SetExtFilter(null)">All</button>
                         @foreach (var e in results.CountsByExtension.OrderByDescending(k => k.Value).Take(8))
                         {
                             <button class="filter-chip @(Ext == e.Key ? "active" : "")"
-                                    @onclick="() => SetFilter(ext: e.Key)">
+                                    @onclick="() => SetExtFilter(e.Key)">
                                 @e.Key.ToUpperInvariant() <span class="filter-count">@e.Value</span>
                             </button>
                         }
@@ -110,6 +128,11 @@
             }
         </div>
 
+        @if (RequestedPage > TotalPages)
+        {
+            <p class="text-muted small">There is no page @RequestedPage — showing the last page instead.</p>
+        }
+
         @if (results.TotalCount > PageSize)
         {
             <div class="search-paging">
@@ -127,15 +150,30 @@
     [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
     [SupplyParameterFromQuery(Name = "module")] public string? Module { get; set; }
     [SupplyParameterFromQuery(Name = "ext")] public string? Ext { get; set; }
-    [SupplyParameterFromQuery(Name = "page")] public int? PageParam { get; set; }
+    [SupplyParameterFromQuery(Name = "from")] public string? From { get; set; }
 
-    private int Page => PageParam is > 0 ? PageParam.Value : 1;
+    // Taken as a string, not an int. Bound as int?, anything non-numeric in the URL throws
+    // during parameter binding and takes the whole page down with "Something went wrong" —
+    // and a URL is the easiest thing in the world to mistype or truncate.
+    [SupplyParameterFromQuery(Name = "page")] public string? PageParam { get; set; }
+
+    private int RequestedPage =>
+        int.TryParse(PageParam, out var p) && p > 0 ? p : 1;
+
+    private int Page => results is null ? RequestedPage : Math.Clamp(RequestedPage, 1, TotalPages);
+
     private int TotalPages => results is null ? 1 : Math.Max(1, (int)Math.Ceiling(results.TotalCount / (double)PageSize));
+
+    private bool HasFilters => !string.IsNullOrEmpty(Module) || !string.IsNullOrEmpty(Ext);
 
     private SearchResults? results;
     private IndexStats? stats;
     private bool isSearching;
+    private string? searchError;
     private CancellationTokenSource _cts = new();
+
+    // Guards against an older, slower query overwriting a newer one's results.
+    private int _requestSeq;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -144,44 +182,70 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await RefreshStatsAsync();
+    }
+
+    private async Task RefreshStatsAsync()
+    {
         try { stats = await SearchIndex.GetStatsAsync(_cts.Token); }
-        catch { /* index not ready yet; the page still works */ }
+        catch { stats = null; /* index not ready yet; the page still works */ }
     }
 
     private async Task RunSearchAsync()
     {
+        searchError = null;
+
         if (string.IsNullOrWhiteSpace(Query))
         {
             results = null;
+            await RefreshStatsAsync();   // so the build banner reflects reality, not page-load time
             return;
         }
 
+        var seq = ++_requestSeq;
         isSearching = true;
         try
         {
-            results = await SearchIndex.SearchAsync(Query, Module, Ext,
-                skip: (Page - 1) * PageSize, take: PageSize, ct: _cts.Token);
+            var found = await SearchIndex.SearchAsync(Query, Module, Ext,
+                skip: (RequestedPage - 1) * PageSize, take: PageSize, ct: _cts.Token);
+
+            if (seq != _requestSeq) return;   // a newer query already answered
+
+            // An out-of-range page would otherwise report a result count with no rows under it.
+            // Re-ask for the last real page instead of showing an empty list.
+            var lastPage = Math.Max(1, (int)Math.Ceiling(found.TotalCount / (double)PageSize));
+            if (found.Hits.Count == 0 && found.TotalCount > 0 && RequestedPage > lastPage)
+            {
+                found = await SearchIndex.SearchAsync(Query, Module, Ext,
+                    skip: (lastPage - 1) * PageSize, take: PageSize, ct: _cts.Token);
+                if (seq != _requestSeq) return;
+            }
+
+            results = found;
         }
         catch (OperationCanceledException) { }
-        catch (Exception)
+        catch (Exception ex)
         {
+            if (seq != _requestSeq) return;
+            // Reporting a broken or locked index as "no results" sends people hunting for a
+            // document that is sitting right there. Say what actually happened.
+            Logger.LogError(ex, "Search failed for query {Query}", Query);
             results = null;
+            searchError = ex.Message;
         }
         finally
         {
-            isSearching = false;
+            if (seq == _requestSeq) isSearching = false;
         }
     }
 
-    private void SetFilter(string? module = null, string? ext = null)
-    {
-        // Passing null means "clear this one", so read the other from the current state.
-        var nextModule = module;
-        var nextExt = ext;
-        if (module is null && ext is not null) nextModule = Module;
-        if (ext is null && module is not null) nextExt = Ext;
-        Navigate(Query ?? string.Empty, nextModule, nextExt, 1);
-    }
+    // Each facet is set independently. The previous single method could not tell "clear the
+    // module facet" from "clear both", so either All chip wiped the other row's selection too.
+    private void SetModuleFilter(string? module) => Navigate(Query ?? string.Empty, module, Ext, 1);
+
+    private void SetExtFilter(string? ext) => Navigate(Query ?? string.Empty, Module, ext, 1);
+
+    private void ClearFilters() => Navigate(Query ?? string.Empty, null, null, 1);
 
     private void GoToPage(int page) => Navigate(Query ?? string.Empty, Module, Ext, page);
 
@@ -190,9 +254,12 @@
         var query = new Dictionary<string, object?> { ["q"] = string.IsNullOrWhiteSpace(q) ? null : q };
         if (!string.IsNullOrEmpty(module)) query["module"] = module;
         if (!string.IsNullOrEmpty(ext)) query["ext"] = ext;
+        if (!string.IsNullOrEmpty(From)) query["from"] = From;   // keep the sidebar's module
         if (page > 1) query["page"] = page;
 
-        Nav.NavigateTo(Nav.GetUriWithQueryParameters("/search", query), replace: true);
+        // Paging and filtering are deliberate steps, so they push history: Back should undo a
+        // filter or step back a page rather than leaving the results entirely.
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters("/search", query));
     }
 
     /// <summary>Carry the query into the viewer so it can highlight what matched.</summary>

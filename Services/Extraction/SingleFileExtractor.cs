@@ -29,6 +29,12 @@ public abstract class SingleFileExtractor : ITextExtractor
 
     private ExtractionResult ExtractSafely(string path, CancellationToken ct)
     {
+        // Bound how long one file may hold the queue. Extractors cooperate by checking the token
+        // between pages/sheets; a library that blocks inside a single native call cannot be
+        // interrupted, so this bounds the common case rather than guaranteeing every case.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ExtractionLimits.SingleFileTimeout);
+
         try
         {
             var info = new FileInfo(path);
@@ -39,12 +45,17 @@ public abstract class SingleFileExtractor : ITextExtractor
             if (info.Length > ExtractionLimits.MaxFileBytes)
                 return ExtractionResult.Skipped(Name, $"File exceeds {ExtractionLimits.MaxFileBytes / 1048576} MB");
 
-            var raw = ExtractOne(path, ct);
+            var raw = ExtractOne(path, timeout.Token);
             return ExtractionResult.FromText(TextNormalizer.Normalize(raw), Name);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw;
+            throw;   // shutting down — not this file's fault
+        }
+        catch (OperationCanceledException)
+        {
+            return ExtractionResult.Failed(Name,
+                $"Extraction exceeded {ExtractionLimits.SingleFileTimeout.TotalSeconds:F0}s");
         }
         catch (Exception ex)
         {

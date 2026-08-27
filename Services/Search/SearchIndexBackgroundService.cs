@@ -58,8 +58,27 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         _logger = logger;
     }
 
-    /// <summary>Ask for a rescan as soon as the current pass finishes (Settings "Rebuild", or a sync).</summary>
+    /// <summary>Ask for a rescan as soon as the current pass finishes (a sync, or a rebuild).</summary>
     public void RequestRescan() => _rescanRequested = true;
+
+    /// <summary>
+    /// Discard the index and start again. Takes the same gate the indexing pass holds, so the
+    /// tables can never be dropped out from under a pass that is midway through writing to them.
+    /// </summary>
+    public async Task RebuildAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await _searchDb.ResetAsync(ct);
+            _logger.LogInformation("Search index rebuild requested; index cleared");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        RequestRescan();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -131,6 +150,11 @@ public sealed class SearchIndexBackgroundService : BackgroundService
             IsIndexing = true;
             QueuedTotal = work.ToIndex.Count;
             QueuedDone = 0;
+
+            // Claim the whole queue up front so the Settings panel and the search page banner
+            // can show honest progress instead of a permanent 100%.
+            await _index.MarkPendingAsync(
+                work.ToIndex.Select(f => (f.Module, f.FileId, f.StoredPath)).ToList(), ct);
 
             foreach (var (module, fileId) in work.ToRemove)
             {
@@ -284,7 +308,11 @@ public sealed class SearchIndexBackgroundService : BackgroundService
                 // Leave a file alone if it is current, or if it already used up its retry
                 // allowance and hasn't changed since — retrying a corrupt file forever helps
                 // nobody. Editing the file resets that, because the fingerprint changes.
-                if (unchanged && (known.Status != "failed" || known.Attempts >= MaxAttempts)) continue;
+                // 'pending' means a previous pass claimed this file and was interrupted before
+                // finishing it. Without this clause an unchanged file could sit pending forever,
+                // never indexed and permanently inflating the outstanding count.
+                var stillOwed = known.Status == "pending";
+                if (unchanged && !stillOwed && (known.Status != "failed" || known.Attempts >= MaxAttempts)) continue;
             }
 
             toIndex.Add(new PendingFile(
