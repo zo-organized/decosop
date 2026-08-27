@@ -44,8 +44,31 @@ public sealed class SearchIndexService
     /// One weight per FTS5 column, in declaration order. The first three are UNINDEXED and
     /// contribute nothing. A title match should outrank a passing mention buried in a
     /// spreadsheet, so Title is weighted an order of magnitude above Body.
+    ///
+    /// FolderPath was originally 4.0 and is now 2.0: a folder name matching a query word was
+    /// beating documents that were genuinely about it — searching "fee schedule" surfaced
+    /// everything under the Scheduling folder, and "collections" everything under a folder
+    /// whose name happened to contain it.
     /// </summary>
-    private const string Bm25Weights = "0.0, 0.0, 0.0, 10.0, 4.0, 3.0, 1.0";
+    private const string Bm25Weights = "0.0, 0.0, 0.0, 10.0, 2.0, 3.0, 1.0";
+
+    /// <summary>
+    /// Superseded copies are pushed below their live equivalents. This library keeps retired
+    /// documents in place, marked by folder or filename ("zzz ARCHIVE", "not in use", "old-"),
+    /// and without this the archived copy of a procedure routinely outranked the live one —
+    /// a search for "root canal setup" returned three archived copies at ranks 1-3 with the
+    /// identical live documents directly beneath them.
+    ///
+    /// A penalty rather than a filter: bm25 is negative and lower is better, so adding a
+    /// constant demotes these without hiding them. Someone deliberately looking for an
+    /// archived version still finds it.
+    /// </summary>
+    private const string SupersededPenalty = """
+        (CASE WHEN CategoryPath LIKE '%archive%' OR CategoryPath LIKE '%zzz%'
+                OR CategoryPath LIKE '%not in use%' OR Title LIKE '%not in use%'
+                OR Title LIKE 'zzz%' OR Title LIKE 'old-%'
+              THEN 4.0 ELSE 0.0 END)
+        """;
 
     /// <summary>Zero-based index of Body among the FTS5 columns, for snippet().</summary>
     private const int BodyColumn = 6;
@@ -218,7 +241,7 @@ public sealed class SearchIndexService
             cmd.CommandText = $"""
                 SELECT Module, FileId, Ext, Title, CategoryPath, FileName,
                        snippet(SearchIndex, {BodyColumn}, char(2), char(3), '…', 18) AS Snip,
-                       bm25(SearchIndex, {Bm25Weights}) AS Rank
+                       bm25(SearchIndex, {Bm25Weights}) + {SupersededPenalty} AS Rank
                 FROM SearchIndex
                 WHERE SearchIndex MATCH @match{filter}
                 ORDER BY Rank

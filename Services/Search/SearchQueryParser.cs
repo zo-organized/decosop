@@ -37,9 +37,17 @@ public static class SearchQueryParser
                 continue;
             }
 
+            // Short words are matched exactly. In this library they are nearly always acronyms
+            // — COB, EOB, PPO, ERA, par, tx, op — where a prefix match is actively destructive:
+            // "par levels" broadened to par* returned 159 results, none of them about par levels.
+            if (text.Length < MinPrefixLength)
+            {
+                parts.Add(Quote(text));
+                continue;
+            }
+
             var root = Broaden(text);
-            // Very short words are left exact — "ok*" would match half the library.
-            parts.Add(root.Length >= 3 ? Quote(root) + "*" : Quote(text));
+            parts.Add(Quote(root) + "*");
         }
 
         return new ParsedQuery(
@@ -47,6 +55,13 @@ public static class SearchQueryParser
             MatchAny: string.Join(" OR ", parts),
             Terms: tokens.Select(t => t.Text).ToList());
     }
+
+    /// <summary>
+    /// Shortest word that earns a prefix match. Below this a word carries too little information
+    /// for a prefix to mean anything, and in a dental office short words are usually acronyms
+    /// that should match exactly.
+    /// </summary>
+    private const int MinPrefixLength = 4;
 
     private static string Quote(string text) => '"' + text.Replace("\"", "\"\"") + '"';
 
