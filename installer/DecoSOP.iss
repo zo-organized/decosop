@@ -11,7 +11,7 @@
 ;   7. Import SOP uploads dir       (only if Import selected, optional — legacy uploads)
 ;   8. Import Documents uploads dir (only if Import selected, optional — legacy uploads)
 ;   9. Auto-Update Preference (checks, auto-install, time picker)
-;  10. LibreOffice (optional download + install for Office doc previews)
+;  10. LibreOffice (optional download + install: Office doc previews + search indexing)
 ;  11. Shortcuts (desktop icon)
 ;  12. Ready to Install / Installing / Finish (open in browser)
 ;
@@ -20,7 +20,7 @@
 ; The category/file index is rebuilt from those folders automatically on startup.
 
 #define MyAppName "DecoSOP"
-#define MyAppVersion "2.0.2"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/zo-organized/decosop"
 #define MyAppExeName "DecoSOP.exe"
@@ -657,13 +657,13 @@ begin
     Enabled := False;
   end;
 
-  // Page 9: LibreOffice (after auto-update — optional download for Office doc previews)
+  // Page 9: LibreOffice (after auto-update — powers Office previews AND legacy .doc search indexing)
   LibreOfficeDetected := IsLibreOfficeInstalled;
 
   LibreOfficePage := CreateCustomPage(
     UpdatePage.ID,
     'Office Document Previews',
-    'LibreOffice enables inline previews of Word, Excel, and PowerPoint files.');
+    'LibreOffice lets DecoSOP preview Office files and search inside older ones.');
 
   if LibreOfficeDetected then
   begin
@@ -672,7 +672,8 @@ begin
       Parent := LibreOfficePage.Surface;
       Caption := 'LibreOffice is already installed on this computer.' + #13#10 + #13#10 +
                  'Office documents (Word, Excel, PowerPoint) will be converted to PDF' + #13#10 +
-                 'automatically for inline preview in the browser.' + #13#10 + #13#10 +
+                 'automatically for inline preview in the browser, and the contents of' + #13#10 +
+                 'older .doc files will be included in search results.' + #13#10 + #13#10 +
                  'No additional action is needed.';
       Left := 0;
       Top := 0;
@@ -686,10 +687,13 @@ begin
     with TNewStaticText.Create(LibreOfficePage) do
     begin
       Parent := LibreOfficePage.Surface;
-      Caption := 'DecoSOP can show inline previews of Office documents (Word, Excel,' + #13#10 +
-                 'PowerPoint) by converting them to PDF using LibreOffice.' + #13#10 + #13#10 +
-                 'Without LibreOffice, Office documents will still be available for' + #13#10 +
-                 'download but cannot be previewed in the browser.' + #13#10 + #13#10 +
+      Caption := 'LibreOffice does two jobs for DecoSOP. It converts Office documents' + #13#10 +
+                 '(Word, Excel, PowerPoint) to PDF so they preview in the browser, and it' + #13#10 +
+                 'reads older .doc files so their contents can be searched.' + #13#10 + #13#10 +
+                 'Without it, Office documents can still be downloaded, and older .doc' + #13#10 +
+                 'files can still be found by name — but you will not be able to search' + #13#10 +
+                 'inside them. In a long-established library that is often a large share' + #13#10 +
+                 'of the collection.' + #13#10 + #13#10 +
                  'LibreOffice is free and open-source (approx. 350 MB download).';
       Left := 0;
       Top := 0;
