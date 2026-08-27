@@ -50,6 +50,7 @@ launchSettings.json
 *.db
 *.db-shm
 *.db-wal
+*.db.bak-*
 
 ## OS files
 Thumbs.db

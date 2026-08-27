@@ -117,43 +117,91 @@ using (var scope = app.Services.CreateScope())
     var webRemovalSentinel = Path.Combine(dataDir, "webmodules-removed.flag");
     if (!File.Exists(webRemovalSentinel))
     {
+        var migrationLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Migration");
         try
         {
-            if (File.Exists(dbPath))
+            // Only do destructive work — and only take a backup — if the legacy tables are
+            // actually still here. On a fresh install there are none, so a full-size copy of
+            // the database would be pure waste.
+            var legacyTables = new List<string>();
+            using (var check = conn.CreateCommand())
             {
-                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                foreach (var suffix in new[] { "", "-wal", "-shm" })
+                check.CommandText = """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN ('WebDocuments', 'WebDocCategories', 'Documents', 'Categories');
+                    """;
+                using var reader = await check.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    legacyTables.Add(reader.GetString(0));
+            }
+
+            if (legacyTables.Count > 0)
+            {
+                migrationLogger.LogInformation("Removing legacy web module tables: {Tables}", string.Join(", ", legacyTables));
+
+                if (File.Exists(dbPath))
                 {
-                    var src = dbPath + suffix;
-                    if (File.Exists(src))
-                        File.Copy(src, $"{dbPath}.bak-{stamp}{suffix}", overwrite: true);
+                    var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                    foreach (var suffix in new[] { "", "-wal", "-shm" })
+                    {
+                        var src = dbPath + suffix;
+                        if (File.Exists(src))
+                            File.Copy(src, $"{dbPath}.bak-{stamp}{suffix}", overwrite: true);
+                    }
+                }
+
+                // The legacy category tables self-reference through ParentId, and
+                // Microsoft.Data.Sqlite enables foreign keys by default. DROP TABLE clears rows
+                // internally, so dropping a populated self-referencing table raises
+                // "FOREIGN KEY constraint failed". Suspend enforcement for the drops only.
+                using (var fkOff = conn.CreateCommand())
+                {
+                    fkOff.CommandText = "PRAGMA foreign_keys=OFF";
+                    await fkOff.ExecuteNonQueryAsync();
+                }
+                try
+                {
+                    using var drop = conn.CreateCommand();
+                    drop.CommandText = """
+                        DROP TABLE IF EXISTS WebDocuments;
+                        DROP TABLE IF EXISTS WebDocCategories;
+                        DROP TABLE IF EXISTS Documents;
+                        DROP TABLE IF EXISTS Categories;
+                        DELETE FROM UserPreferences
+                            WHERE EntityType IN ('Category','SopDocument','WebDocCategory','WebDocument');
+                        """;
+                    await drop.ExecuteNonQueryAsync();
+                }
+                finally
+                {
+                    using var fkOn = conn.CreateCommand();
+                    fkOn.CommandText = "PRAGMA foreign_keys=ON";
+                    await fkOn.ExecuteNonQueryAsync();
                 }
             }
 
-            using (var drop = conn.CreateCommand())
+            // The removal itself is complete, so record it now. VACUUM below only reclaims
+            // space; letting a VACUUM failure block the sentinel would re-run the drop — and
+            // another full-size backup copy — on every single startup.
+            await File.WriteAllTextAsync(webRemovalSentinel, $"Removed {DateTime.Now:O}");
+
+            try
             {
-                drop.CommandText = """
-                    DROP TABLE IF EXISTS WebDocuments;
-                    DROP TABLE IF EXISTS WebDocCategories;
-                    DROP TABLE IF EXISTS Documents;
-                    DROP TABLE IF EXISTS Categories;
-                    DELETE FROM UserPreferences
-                        WHERE EntityType IN ('Category','SopDocument','WebDocCategory','WebDocument');
-                    """;
-                await drop.ExecuteNonQueryAsync();
-            }
-            using (var vacuum = conn.CreateCommand())
-            {
+                using var vacuum = conn.CreateCommand();
                 vacuum.CommandText = "VACUUM";
+                vacuum.CommandTimeout = 300; // a heavily fragmented database can take a while
                 await vacuum.ExecuteNonQueryAsync();
             }
-
-            await File.WriteAllTextAsync(webRemovalSentinel, $"Removed {DateTime.Now:O}");
+            catch (Exception ex)
+            {
+                migrationLogger.LogWarning(ex,
+                    "VACUUM after web module removal failed. The data is correct but the database file keeps its current size; run VACUUM manually to compact it.");
+            }
         }
         catch (Exception ex)
         {
-            var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Migration");
-            logger.LogError(ex, "Web module removal/cleanup failed.");
+            migrationLogger.LogError(ex, "Web module removal/cleanup failed.");
         }
     }
 
