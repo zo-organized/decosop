@@ -1585,7 +1585,7 @@ h1:focus {
 }
 
 .search-hit {
-    padding: 0.55rem 0;
+    padding: 0.45rem 0;
     border-bottom: 1px solid #eceef1;
 }
 
@@ -1601,7 +1601,7 @@ h1:focus {
 }
 
 .search-hit-title {
-    font-size: 0.88rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: var(--accent-link);
     text-decoration: none;
@@ -1613,7 +1613,7 @@ h1:focus {
 
 .search-hit-ext,
 .search-hit-module {
-    font-size: 0.6rem;
+    font-size: 0.57rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     padding: 0.1rem 0.35rem;
@@ -1624,13 +1624,13 @@ h1:focus {
 }
 
 .search-hit-path {
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     color: #6c757d;
     margin-top: 0.15rem;
 }
 
 .search-hit-snippet {
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     color: #43494f;
     margin-top: 0.3rem;
     line-height: 1.5;
@@ -1700,5 +1700,12 @@ h1:focus {
 .fti-other   { color: #8a94a0; }
 
 .search-hit-head {
-    gap: 0.4rem;
+    gap: 0.35rem;
+}
+
+/* The icon sizes from its container, not the title, so it needs pinning to the
+   title's scale — otherwise it grew visually dominant as the type came down. */
+.search-hit-head .file-type-icon {
+    width: 0.95rem;
+    height: 0.95rem;
 }
