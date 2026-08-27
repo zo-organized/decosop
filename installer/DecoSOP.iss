@@ -55,7 +55,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Published app files — excludes DB and upload dirs (user data)
-Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,doc-uploads,sop-uploads"
+Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,decosop-search.db,doc-uploads,sop-uploads"
 ; Document-sync setup script (SharePoint/OneDrive via rclone, or a local folder/share)
 Source: "Configure-DecoSOP-Sync.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -130,6 +130,11 @@ Type: files; Name: "{app}\rclone.exe"
 Type: files; Name: "{app}\rclone.conf"
 Type: files; Name: "{app}\rclone-bisync.ps1"
 Type: files; Name: "{app}\appsettings.Production.json"
+; The full-text search index is derived data — it rebuilds itself from the documents — so
+; unlike the database it is not worth preserving across an uninstall.
+Type: files; Name: "{app}\decosop-search.db"
+Type: files; Name: "{app}\decosop-search.db-wal"
+Type: files; Name: "{app}\decosop-search.db-shm"
 ; NOTE: the database, uploads, and the local {app}\sync mirror are intentionally preserved
 ; (sync is just a rebuildable copy of OneDrive; delete it by hand if you want the space back)
 
