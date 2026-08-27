@@ -1505,12 +1505,12 @@ h1:focus {
    ============================================ */
 
 .search-page h1 {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     margin-bottom: 0.35rem;
 }
 
 .search-page .lead {
-    font-size: 0.95rem;
+    font-size: 0.88rem;
     margin-bottom: 1rem;
 }
 
@@ -1519,8 +1519,8 @@ h1:focus {
 }
 
 .search-input {
-    font-size: 0.95rem;
-    padding: 0.45rem 0.75rem;
+    font-size: 0.88rem;
+    padding: 0.4rem 0.7rem;
     max-width: 640px;
 }
 
@@ -1543,7 +1543,7 @@ h1:focus {
 }
 
 .filter-label {
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #6c757d;
@@ -1554,8 +1554,8 @@ h1:focus {
     background: #fff;
     border: 1px solid #dee2e6;
     border-radius: 999px;
-    padding: 0.15rem 0.6rem;
-    font-size: 0.78rem;
+    padding: 0.12rem 0.55rem;
+    font-size: 0.73rem;
     color: #343a40;
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
@@ -1585,7 +1585,7 @@ h1:focus {
 }
 
 .search-hit {
-    padding: 0.65rem 0;
+    padding: 0.55rem 0;
     border-bottom: 1px solid #eceef1;
 }
 
@@ -1601,7 +1601,7 @@ h1:focus {
 }
 
 .search-hit-title {
-    font-size: 0.95rem;
+    font-size: 0.88rem;
     font-weight: 600;
     color: var(--accent-link);
     text-decoration: none;
@@ -1613,7 +1613,7 @@ h1:focus {
 
 .search-hit-ext,
 .search-hit-module {
-    font-size: 0.63rem;
+    font-size: 0.6rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     padding: 0.1rem 0.35rem;
@@ -1624,13 +1624,13 @@ h1:focus {
 }
 
 .search-hit-path {
-    font-size: 0.74rem;
+    font-size: 0.7rem;
     color: #6c757d;
     margin-top: 0.15rem;
 }
 
 .search-hit-snippet {
-    font-size: 0.83rem;
+    font-size: 0.78rem;
     color: #43494f;
     margin-top: 0.3rem;
     line-height: 1.5;
