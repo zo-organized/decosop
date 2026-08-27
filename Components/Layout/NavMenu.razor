@@ -9,7 +9,6 @@
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
 @inject SyncNotificationService SyncNotify
-@inject SearchIndexService SearchIndex
 @implements IDisposable
 
 <div class="top-row ps-3 navbar navbar-dark">
@@ -17,7 +16,6 @@
         <a class="navbar-brand" href="">
             <img src="icon.svg" alt="" width="30" height="30" style="margin-right: 0.5rem;" />DecoSOP
         </a>
-        <a class="btn-search-header" href="search" title="Search everything">&#128269;</a>
         <a class="btn-favorites-header" href="favorites" title="All Favorites">&#9733;</a>
     </div>
 </div>
@@ -147,57 +145,27 @@
                @bind="searchQuery" @bind:event="oninput" @onkeyup="OnSearchKeyUp" />
     </div>
 
-    @if (isSearching)
+    @* Inventory still answers in the sidebar; it has no main-view results surface of its own.
+       SOP and Document searching now renders in the main view, so the folder tree below stays
+       put and you never lose your place in it while searching. *@
+    @if (isSearching && currentMode == "inv")
     {
         <div class="nav-section px-3 py-1">
             <span class="nav-section-title">Search Results</span>
         </div>
 
-        @if (currentMode == "inv")
+        @foreach (var item in invSearchResults)
         {
-            @foreach (var item in invSearchResults)
-            {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
-                        @item.Title
-                        <span class="nav-category-hint">@item.Category?.Name</span>
-                    </NavLink>
-                </div>
-            }
-            @if (invSearchResults.Count == 0)
-            {
-                <div class="px-3 py-2 text-muted small">No results found.</div>
-            }
-        }
-        else
-        {
-            @* SOPs and Documents share one ranked list — a subject doesn't care which module
-               it happens to live in. Inventory keeps its own search above. *@
-            @foreach (var hit in contentSearchResults)
-            {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@SearchHitUrl(hit)">
-                        @hit.Title
-                        <span class="nav-category-hint">@hit.CategoryPath</span>
-                        @if (!string.IsNullOrWhiteSpace(hit.SnippetHtml))
-                        {
-                            <span class="nav-search-snippet">@((MarkupString)hit.SnippetHtml)</span>
-                        }
-                    </NavLink>
-                </div>
-            }
-            @if (contentSearchResults.Count == 0)
-            {
-                <div class="px-3 py-2 text-muted small">No results found.</div>
-            }
-            else
-            {
-                <NavLink class="nav-link nav-search-all" href="@($"search?q={Uri.EscapeDataString(searchQuery)}")">
-                    @(contentSearchTotal > contentSearchResults.Count
-                        ? $"See all {contentSearchTotal:N0} results"
-                        : "Open in full search") &rarr;
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
+                    @item.Title
+                    <span class="nav-category-hint">@item.Category?.Name</span>
                 </NavLink>
-            }
+            </div>
+        }
+        @if (invSearchResults.Count == 0)
+        {
+            <div class="px-3 py-2 text-muted small">No results found.</div>
         }
     }
     else
@@ -340,8 +308,6 @@
     private List<SopCategory>? sopCategories;
     private List<SopCategory> sopFavoriteCategories = [];
     private List<SopFile> sopFavoriteDocuments = [];
-    private List<SearchHit> contentSearchResults = [];
-    private int contentSearchTotal;
 
     private List<DocumentCategory>? docCategories;
     private List<DocumentCategory> docFavoriteCategories = [];
@@ -488,10 +454,14 @@
         {
             await InvokeAsync(() =>
             {
-                searchQuery = string.Empty;
-                contentSearchResults = [];
-                contentSearchTotal = 0;
-                invSearchResults = [];
+                // Keep the box populated while the results it produced are on screen —
+                // clearing it here would wipe the query the moment our own navigation landed.
+                // Opening one of the results, or going anywhere else, resets it.
+                if (!IsOnResults)
+                {
+                    searchQuery = string.Empty;
+                    invSearchResults = [];
+                }
                 StateHasChanged();
             });
 
@@ -740,20 +710,26 @@
 
     // --- Search ---
 
-    /// <summary>The sidebar shows a short list; the full page handles browsing everything.</summary>
-    private const int SidebarResultLimit = 12;
+    /// <summary>Whether the main view is currently showing search results.</summary>
+    private bool IsOnResults => Nav.Uri.Contains("/search", StringComparison.OrdinalIgnoreCase);
 
-    private string SearchHitUrl(SearchHit hit)
-        => $"{hit.Url.TrimStart('/')}?q={Uri.EscapeDataString(searchQuery)}";
+    /// <summary>
+    /// Put the current query's results in the main view. Replaces rather than pushes, so typing
+    /// a word does not leave a history entry per keystroke to back out through.
+    /// </summary>
+    private void ShowResults()
+    {
+        if (string.IsNullOrWhiteSpace(searchQuery)) return;
+        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}", replace: IsOnResults);
+    }
 
     private async Task OnSearchKeyUp(KeyboardEventArgs e)
     {
-        // Enter commits the search: hand off to the full results page, where you can filter,
-        // page through, and share the URL.
-        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(searchQuery))
+        // Enter commits immediately rather than waiting out the debounce.
+        if (e.Key == "Enter" && currentMode != "inv")
         {
             debounceTimer?.Stop();
-            Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}");
+            ShowResults();
             return;
         }
 
@@ -762,9 +738,9 @@
 
         if (string.IsNullOrWhiteSpace(searchQuery))
         {
-            contentSearchResults = [];
-            contentSearchTotal = 0;
             invSearchResults = [];
+            // Clearing the box leaves the results behind and returns you to where you browse.
+            if (currentMode != "inv" && IsOnResults) Nav.NavigateTo(homeHref, replace: true);
             return;
         }
 
@@ -780,11 +756,7 @@
                 }
                 else
                 {
-                    // The content index has its own database, so it doesn't need the shared
-                    // DbContext semaphore the other lookups go through.
-                    var found = await SearchIndex.SearchAsync(searchQuery, take: SidebarResultLimit);
-                    contentSearchResults = found.Hits.ToList();
-                    contentSearchTotal = found.TotalCount;
+                    ShowResults();
                 }
                 StateHasChanged();
             });

@@ -10,12 +10,7 @@
 <PageTitle>@(string.IsNullOrWhiteSpace(Query) ? "Search" : $"{Query} - Search") - DecoSOP</PageTitle>
 
 <div class="home-container search-page">
-    <h1>Search</h1>
-
-    <div class="search-box">
-        <input type="search" class="form-control search-input" placeholder="Search everything — try a subject, not a filename"
-               value="@Query" @oninput="OnInput" @onkeyup="OnKeyUp" autofocus />
-    </div>
+    <h1>@(string.IsNullOrWhiteSpace(Query) ? "Search" : $"“{Query}”")</h1>
 
     @if (isSearching)
     {
@@ -23,7 +18,7 @@
     }
     else if (string.IsNullOrWhiteSpace(Query))
     {
-        <p class="lead">Type a subject and every SOP or document that discusses it will appear here.</p>
+        <p class="lead">Type a subject in the search box on the left — every SOP or document that discusses it appears here.</p>
         @if (stats is not null && stats.Total > 0 && stats.PercentComplete < 99.5)
         {
             <div class="alert alert-info search-building">
@@ -140,13 +135,10 @@
     private SearchResults? results;
     private IndexStats? stats;
     private bool isSearching;
-    private string pendingQuery = string.Empty;
-    private System.Timers.Timer? debounce;
     private CancellationTokenSource _cts = new();
 
     protected override async Task OnParametersSetAsync()
     {
-        pendingQuery = Query ?? string.Empty;
         await RunSearchAsync();
     }
 
@@ -178,27 +170,6 @@
         finally
         {
             isSearching = false;
-        }
-    }
-
-    // Typing updates the address bar rather than local state, so a search stays shareable
-    // and the browser's back button steps through what you actually looked at.
-    private void OnInput(ChangeEventArgs e)
-    {
-        pendingQuery = e.Value?.ToString() ?? string.Empty;
-        debounce?.Stop();
-        debounce?.Dispose();
-        debounce = new System.Timers.Timer(300) { AutoReset = false };
-        debounce.Elapsed += (_, _) => InvokeAsync(() => Navigate(pendingQuery, Module, Ext, 1));
-        debounce.Start();
-    }
-
-    private void OnKeyUp(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter")
-        {
-            debounce?.Stop();
-            Navigate(pendingQuery, Module, Ext, 1);
         }
     }
 
@@ -238,6 +209,5 @@
     {
         _cts.Cancel();
         _cts.Dispose();
-        debounce?.Dispose();
     }
 }
