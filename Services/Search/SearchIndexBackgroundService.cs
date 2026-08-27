@@ -248,16 +248,32 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         foreach (var f in files)
         {
             ct.ThrowIfCancellationRequested();
-            live.Add((module, f.Id));
 
             var fullPath = Path.Combine(uploadRoot, f.StoredFileName);
             FileInfo info;
             try
             {
                 info = new FileInfo(fullPath);
-                if (!info.Exists) continue;   // reconciler will catch this; nothing to index today
             }
-            catch { continue; }
+            catch
+            {
+                // Could not even stat it — a share hiccup or a permissions blip. Treat as
+                // transient: keep it live so whatever is already indexed survives this pass.
+                live.Add((module, f.Id));
+                continue;
+            }
+
+            if (!info.Exists)
+            {
+                // The row is still here but its file is gone. Normally the folder reconciler
+                // deletes the row and this never arises, but with folder sync switched off — or
+                // in the window between a deletion and the next reconcile — leaving it indexed
+                // means search happily returns a result that opens onto nothing. Leaving it out
+                // of `live` lets the caller drop it from the index.
+                continue;
+            }
+
+            live.Add((module, f.Id));
 
             var mtime = info.LastWriteTimeUtc;
             var size = info.Length;
