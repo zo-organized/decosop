@@ -10,8 +10,10 @@
     <Version>2.1.0</Version>
     <!-- The installer packages from .\publish, so publish output lands inside the project
          folder. Without this, the next "dotnet build" globs publish\wwwroot as project content
-         and fails with BLAZOR106 on the scoped JS it finds there. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**</DefaultItemExcludes>
+         and fails with BLAZOR106 on the scoped JS it finds there. The test project lives under
+         .	ests for the same reason: this is a Web SDK project at the repo root, so its default
+         globs would otherwise compile the tests into the app. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**;tests\**</DefaultItemExcludes>
     <Authors>Tyler Sweeney</Authors>
     <Company>Deco Dental</Company>
     <Copyright>Copyright (c) 2025 Tyler Sweeney</Copyright>
@@ -42,6 +44,12 @@
          package instead disables pruning and puts the vulnerable assembly back in the output.
          Verify with "dotnet list package" using the vulnerable + include-transitive flags. -->
     <PackageReference Include="NPOI" Version="2.7.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project exercises internal helpers (query broadening, rowid derivation)
+         directly rather than only through their public callers. -->
+    <InternalsVisibleTo Include="DecoSOP.Tests" />
   </ItemGroup>
 
 </Project>

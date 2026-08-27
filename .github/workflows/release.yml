@@ -33,6 +33,9 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Test
+        run: dotnet test tests/DecoSOP.Tests/DecoSOP.Tests.csproj -c Release --nologo
+
       - name: Publish
         run: dotnet publish -c Release -r win-x64 --self-contained -o ./publish -p:Version=${{ steps.version.outputs.VERSION }}
 

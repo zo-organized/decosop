@@ -20,6 +20,7 @@ public static class TextNormalizer
         var sb = new StringBuilder(Math.Min(raw.Length, maxChars));
         var pendingNewlines = 0;
         var pendingSpace = false;
+        var lastWasCarriageReturn = false;
 
         foreach (var ch in raw)
         {
@@ -27,11 +28,16 @@ public static class TextNormalizer
 
             if (ch == '\n' || ch == '\r')
             {
-                // \r\n counts once: a \r is only a newline if a \n doesn't immediately follow.
-                if (ch == '\n' || pendingNewlines == 0) pendingNewlines++;
+                // A CRLF pair is one line break, not two. Counting both turned every line
+                // ending in a Windows text file into a blank line, double-spacing the text
+                // that ends up in snippets.
+                if (!(ch == '\n' && lastWasCarriageReturn)) pendingNewlines++;
+                lastWasCarriageReturn = ch == '\r';
                 pendingSpace = false;
                 continue;
             }
+
+            lastWasCarriageReturn = false;
 
             // Control characters, the replacement char from a bad decode, and private-use
             // codepoints all carry no meaning. The last of those matter here: Word stores
