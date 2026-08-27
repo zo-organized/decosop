@@ -25,6 +25,19 @@
     <!-- Override EF Core's transitive SQLitePCLRaw 2.1.11 (bundles SQLite 3.49.1, vulnerable to
          CVE-2025-6965). 3.0.3 bundles SQLite 3.50.4+, which contains the fix. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+
+    <!-- Content search: text extraction from the document corpus.
+         PdfPig reads the PDF text layer; NPOI reads OpenXML Word and both spreadsheet formats.
+         Legacy .doc/.ppt/.rtf go through LibreOffice (see LibreOfficeTextExtractor) because NPOI
+         no longer ships the legacy Word reader. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <!-- NPOI drags in System.Security.Cryptography.Xml 8.0.2, which carries several known
+         high-severity advisories. Do NOT add an explicit PackageReference to "fix" it: that
+         type ships in the .NET 10 shared framework, so NuGet prunes the transitive package
+         away entirely and the framework's own patched implementation is used. Pinning the
+         package instead disables pruning and puts the vulnerable assembly back in the output.
+         Verify with "dotnet list package" using the vulnerable + include-transitive flags. -->
+    <PackageReference Include="NPOI" Version="2.7.6" />
   </ItemGroup>
 
 </Project>

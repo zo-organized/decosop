@@ -2,7 +2,17 @@ using DecoSOP.Components;
 using DecoSOP.Data;
 using DecoSOP.Models;
 using DecoSOP.Services;
+using DecoSOP.Services.Extraction;
 using Microsoft.EntityFrameworkCore;
+
+// Diagnostic mode: run the text-extraction pipeline over a folder and report coverage by file
+// type, without starting the web host. Used to validate the search index against a real corpus.
+//   DecoSOP.exe extract-report [folder] [maxFilesPerType]
+if (args.Length > 0 && args[0].Equals("extract-report", StringComparison.OrdinalIgnoreCase))
+{
+    SopFileService.DataDirectory = AppContext.BaseDirectory;
+    return await ExtractionReport.RunAsync(args);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -84,6 +94,14 @@ builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
+
+// Content search: text extraction. Extractors are stateless, so they're singletons.
+builder.Services.AddSingleton<ITextExtractor, PlainTextExtractor>();
+builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
+builder.Services.AddSingleton<ITextExtractor, OpenXmlWordExtractor>();
+builder.Services.AddSingleton<ITextExtractor, SpreadsheetExtractor>();
+builder.Services.AddSingleton<ITextExtractor, LibreOfficeTextExtractor>();
+builder.Services.AddSingleton<TextExtractionService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SyncNotificationService>();
 builder.Services.AddSingleton<FolderSyncBackgroundService>();
@@ -548,3 +566,7 @@ app.MapGet("/api/settings/export-db", () =>
 });
 
 app.Run();
+
+// Reached on graceful shutdown. Explicit because the extract-report branch above returns an
+// exit code, which makes the entry point int-returning.
+return 0;
