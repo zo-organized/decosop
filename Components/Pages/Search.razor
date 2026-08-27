@@ -92,6 +92,7 @@
             {
                 <div class="search-hit">
                     <div class="search-hit-head">
+                        <FileTypeIcon FileName="@hit.FileName" />
                         <a class="search-hit-title" href="@HitUrl(hit)">@hit.Title</a>
                         <span class="search-hit-ext">@hit.Extension.ToUpperInvariant()</span>
                         <span class="search-hit-module">@ModuleLabel(hit.Module)</span>
