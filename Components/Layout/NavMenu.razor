@@ -346,10 +346,35 @@
 
     private bool _favoritesLoaded;
 
-    private string currentMode => Nav.Uri.Contains("/favorites", StringComparison.OrdinalIgnoreCase) ? "favorites"
-                                : Nav.Uri.Contains("/documents", StringComparison.OrdinalIgnoreCase) ? "doc"
-                                : Nav.Uri.Contains("/inventory", StringComparison.OrdinalIgnoreCase) ? "inv"
-                                : "sop";
+    private string currentMode
+    {
+        get
+        {
+            var uri = Nav.Uri;
+            if (uri.Contains("/favorites", StringComparison.OrdinalIgnoreCase)) return "favorites";
+            // The results route carries the module it was launched from, so searching out of
+            // Documents does not silently swap the sidebar to the SOP tree and strand you there.
+            if (uri.Contains("/search", StringComparison.OrdinalIgnoreCase)) return ModeFromQuery(uri);
+            if (uri.Contains("/documents", StringComparison.OrdinalIgnoreCase)) return "doc";
+            if (uri.Contains("/inventory", StringComparison.OrdinalIgnoreCase)) return "inv";
+            return "sop";
+        }
+    }
+
+    private static string ModeFromQuery(string uri)
+    {
+        try
+        {
+            var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(uri).Query);
+            if (query.TryGetValue("from", out var from))
+            {
+                var value = from.ToString();
+                if (value is "doc" or "inv" or "sop") return value;
+            }
+        }
+        catch (UriFormatException) { }
+        return "sop";
+    }
 
     private object? currentModeCategories => currentMode switch
     {
@@ -720,7 +745,7 @@
     private void ShowResults()
     {
         if (string.IsNullOrWhiteSpace(searchQuery)) return;
-        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}", replace: IsOnResults);
+        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}&from={currentMode}", replace: IsOnResults);
     }
 
     private async Task OnSearchKeyUp(KeyboardEventArgs e)
