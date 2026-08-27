@@ -1,4 +1,5 @@
 @using DecoSOP.Services
+@using DecoSOP.Services.Search
 @using DecoSOP.Models
 @inject DataCacheService Cache
 @inject SopFileService SopFileService
@@ -8,6 +9,7 @@
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
 @inject SyncNotificationService SyncNotify
+@inject SearchIndexService SearchIndex
 @implements IDisposable
 
 <div class="top-row ps-3 navbar navbar-dark">
@@ -150,23 +152,7 @@
             <span class="nav-section-title">Search Results</span>
         </div>
 
-        @if (currentMode == "doc")
-        {
-            @foreach (var doc in docSearchResults)
-            {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"documents/{doc.Id}")">
-                        @doc.Title
-                        <span class="nav-category-hint">@doc.Category.Name</span>
-                    </NavLink>
-                </div>
-            }
-            @if (docSearchResults.Count == 0)
-            {
-                <div class="px-3 py-2 text-muted small">No results found.</div>
-            }
-        }
-        else if (currentMode == "inv")
+        @if (currentMode == "inv")
         {
             @foreach (var item in invSearchResults)
             {
@@ -184,18 +170,30 @@
         }
         else
         {
-            @foreach (var doc in sopSearchResults)
+            @* SOPs and Documents share one ranked list — a subject doesn't care which module
+               it happens to live in. Inventory keeps its own search above. *@
+            @foreach (var hit in contentSearchResults)
             {
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
-                        @doc.Title
-                        <span class="nav-category-hint">@doc.Category.Name</span>
+                    <NavLink class="nav-link" href="@SearchHitUrl(hit)">
+                        @hit.Title
+                        <span class="nav-category-hint">@hit.CategoryPath</span>
+                        @if (!string.IsNullOrWhiteSpace(hit.SnippetHtml))
+                        {
+                            <span class="nav-search-snippet">@((MarkupString)hit.SnippetHtml)</span>
+                        }
                     </NavLink>
                 </div>
             }
-            @if (sopSearchResults.Count == 0)
+            @if (contentSearchResults.Count == 0)
             {
                 <div class="px-3 py-2 text-muted small">No results found.</div>
+            }
+            else if (contentSearchTotal > contentSearchResults.Count)
+            {
+                <NavLink class="nav-link nav-search-all" href="@($"search?q={Uri.EscapeDataString(searchQuery)}")">
+                    See all @contentSearchTotal.ToString("N0") results &rarr;
+                </NavLink>
             }
         }
     }
@@ -339,12 +337,12 @@
     private List<SopCategory>? sopCategories;
     private List<SopCategory> sopFavoriteCategories = [];
     private List<SopFile> sopFavoriteDocuments = [];
-    private List<SopFile> sopSearchResults = [];
+    private List<SearchHit> contentSearchResults = [];
+    private int contentSearchTotal;
 
     private List<DocumentCategory>? docCategories;
     private List<DocumentCategory> docFavoriteCategories = [];
     private List<OfficeDocument> docFavoriteDocuments = [];
-    private List<OfficeDocument> docSearchResults = [];
 
     private List<InventoryCategory>? invCategories;
     private List<InventoryCategory> invFavoriteCategories = [];
@@ -394,9 +392,8 @@
 
     private string searchPlaceholder => currentMode switch
     {
-        "doc" => "Search documents...",
         "inv" => "Search inventory...",
-        _ => "Search SOPs..."
+        _ => "Search SOPs and documents..."
     };
 
     private string homeHref => currentMode switch
@@ -489,8 +486,8 @@
             await InvokeAsync(() =>
             {
                 searchQuery = string.Empty;
-                sopSearchResults = [];
-                docSearchResults = [];
+                contentSearchResults = [];
+                contentSearchTotal = 0;
                 invSearchResults = [];
                 StateHasChanged();
             });
@@ -740,6 +737,12 @@
 
     // --- Search ---
 
+    /// <summary>The sidebar shows a short list; the full page handles browsing everything.</summary>
+    private const int SidebarResultLimit = 12;
+
+    private string SearchHitUrl(SearchHit hit)
+        => $"{hit.Url.TrimStart('/')}?q={Uri.EscapeDataString(searchQuery)}";
+
     private async Task OnSearchKeyUp()
     {
         debounceTimer?.Stop();
@@ -747,8 +750,8 @@
 
         if (string.IsNullOrWhiteSpace(searchQuery))
         {
-            sopSearchResults = [];
-            docSearchResults = [];
+            contentSearchResults = [];
+            contentSearchTotal = 0;
             invSearchResults = [];
             return;
         }
@@ -759,12 +762,18 @@
             debounceTimer?.Stop();
             await InvokeAsync(async () =>
             {
-                if (currentMode == "doc")
-                    docSearchResults = await Cache.RunExclusiveAsync(() => DocService.SearchAsync(searchQuery));
-                else if (currentMode == "inv")
+                if (currentMode == "inv")
+                {
                     invSearchResults = await Cache.RunExclusiveAsync(() => InvService.GetItemsAsync(null, null, null, searchQuery));
+                }
                 else
-                    sopSearchResults = await Cache.RunExclusiveAsync(() => SopFileService.SearchAsync(searchQuery));
+                {
+                    // The content index has its own database, so it doesn't need the shared
+                    // DbContext semaphore the other lookups go through.
+                    var found = await SearchIndex.SearchAsync(searchQuery, take: SidebarResultLimit);
+                    contentSearchResults = found.Hits.ToList();
+                    contentSearchTotal = found.TotalCount;
+                }
                 StateHasChanged();
             });
         };

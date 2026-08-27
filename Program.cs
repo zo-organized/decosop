@@ -3,6 +3,7 @@ using DecoSOP.Data;
 using DecoSOP.Models;
 using DecoSOP.Services;
 using DecoSOP.Services.Extraction;
+using DecoSOP.Services.Search;
 using Microsoft.EntityFrameworkCore;
 
 // Diagnostic mode: run the text-extraction pipeline over a folder and report coverage by file
@@ -102,6 +103,15 @@ builder.Services.AddSingleton<ITextExtractor, OpenXmlWordExtractor>();
 builder.Services.AddSingleton<ITextExtractor, SpreadsheetExtractor>();
 builder.Services.AddSingleton<ITextExtractor, LibreOfficeTextExtractor>();
 builder.Services.AddSingleton<TextExtractionService>();
+
+// Content search: the index itself lives in its own SQLite file next to decosop.db. It is
+// entirely derived data — delete it and it rebuilds — so it stays out of the DB export and
+// away from the main database's single writer.
+var searchDbPath = Path.Combine(dataDir, "decosop-search.db");
+builder.Services.AddSingleton(sp => new SearchDb(searchDbPath, sp.GetRequiredService<ILogger<SearchDb>>()));
+builder.Services.AddSingleton<SearchIndexService>();
+builder.Services.AddSingleton<SearchIndexBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SearchIndexBackgroundService>());
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SyncNotificationService>();
 builder.Services.AddSingleton<FolderSyncBackgroundService>();

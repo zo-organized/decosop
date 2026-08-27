@@ -124,7 +124,7 @@ public static class ExtractionReport
         if (failures.Count == 0) return;
 
         Console.WriteLine();
-        Console.WriteLine("Most common failures:");
+        Console.WriteLine("Most common failures and skips:");
         foreach (var f in failures)
             Console.WriteLine($"  {f.Count(),4}x  {Truncate(f.Key, 100)}");
     }

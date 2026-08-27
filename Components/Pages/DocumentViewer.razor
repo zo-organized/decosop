@@ -69,7 +69,7 @@ else
         else if (isPdf)
         {
             <div class="doc-preview">
-                <iframe src="/api/documents/@document.Id/preview" class="doc-preview-frame"></iframe>
+                <iframe src="@($"/api/documents/{document.Id}/preview{PdfViewerFragment}")" class="doc-preview-frame"></iframe>
             </div>
         }
         else if (isConvertible)
@@ -124,6 +124,19 @@ else
 }
 
 @code {
+    /// <summary>
+    /// Carried over from a search result so the reader lands on what they were looking for.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? SearchTerm { get; set; }
+
+    /// <summary>
+    /// Chrome and Edge honour #search= in their built-in PDF viewer and open with the term
+    /// already found. Other viewers ignore the fragment harmlessly. Scanned PDFs have no text
+    /// layer to find, so nothing highlights there however good the viewer is.
+    /// </summary>
+    private string PdfViewerFragment =>
+        string.IsNullOrWhiteSpace(SearchTerm) ? "" : $"#search={Uri.EscapeDataString(SearchTerm)}";
+
     [Parameter] public int Id { get; set; }
 
     private OfficeDocument? document;

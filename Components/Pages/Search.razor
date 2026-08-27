@@ -1,0 +1,242 @@
+@page "/search"
+@using DecoSOP.Data
+@using DecoSOP.Services.Search
+@using Microsoft.AspNetCore.WebUtilities
+@inject SearchIndexService SearchIndex
+@inject SearchIndexBackgroundService Indexer
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>@(string.IsNullOrWhiteSpace(Query) ? "Search" : $"{Query} - Search") - DecoSOP</PageTitle>
+
+<div class="home-container search-page">
+    <h1>Search</h1>
+
+    <div class="search-box">
+        <input type="search" class="form-control search-input" placeholder="Search everything — try a subject, not a filename"
+               value="@Query" @oninput="OnInput" @onkeyup="OnKeyUp" autofocus />
+    </div>
+
+    @if (isSearching)
+    {
+        <p class="lead text-muted">Searching…</p>
+    }
+    else if (string.IsNullOrWhiteSpace(Query))
+    {
+        <p class="lead">Type a subject and every SOP or document that discusses it will appear here.</p>
+        @if (stats is not null && stats.Total > 0 && stats.PercentComplete < 99.5)
+        {
+            <div class="alert alert-info search-building">
+                Still reading your documents — <strong>@stats.Done.ToString("N0")</strong> of
+                <strong>@stats.Total.ToString("N0")</strong> files indexed
+                (@stats.PercentComplete.ToString("F0")%). Search works now and gets more complete as it finishes.
+            </div>
+        }
+    }
+    else if (results is null || results.TotalCount == 0)
+    {
+        <p class="lead">No results for <strong>@Query</strong>.</p>
+        <p class="text-muted">Try fewer words, or a different term. Scanned documents are searchable by their
+            title until text recognition has run over them.</p>
+    }
+    else
+    {
+        <p class="lead">
+            <strong>@results.TotalCount.ToString("N0")</strong> result@(results.TotalCount == 1 ? "" : "s")
+            for <strong>@Query</strong>
+            @if (results.IsBroadened)
+            {
+                <span class="text-muted small"> — no document contained all of those words, so these match some of them.</span>
+            }
+        </p>
+
+        @* --- Filters --- *@
+        @if (results.CountsByModule.Count > 1 || results.CountsByExtension.Count > 1 || Module is not null || Ext is not null)
+        {
+            <div class="search-filters">
+                @if (results.CountsByModule.Count > 1 || Module is not null)
+                {
+                    <div class="filter-group">
+                        <span class="filter-label">Where</span>
+                        <button class="filter-chip @(Module is null ? "active" : "")" @onclick="() => SetFilter(module: null)">All</button>
+                        @foreach (var m in results.CountsByModule.OrderByDescending(k => k.Value))
+                        {
+                            <button class="filter-chip @(Module == m.Key ? "active" : "")"
+                                    @onclick="() => SetFilter(module: m.Key)">
+                                @ModuleLabel(m.Key) <span class="filter-count">@m.Value</span>
+                            </button>
+                        }
+                    </div>
+                }
+
+                @if (results.CountsByExtension.Count > 1 || Ext is not null)
+                {
+                    <div class="filter-group">
+                        <span class="filter-label">Type</span>
+                        <button class="filter-chip @(Ext is null ? "active" : "")" @onclick="() => SetFilter(ext: null)">All</button>
+                        @foreach (var e in results.CountsByExtension.OrderByDescending(k => k.Value).Take(8))
+                        {
+                            <button class="filter-chip @(Ext == e.Key ? "active" : "")"
+                                    @onclick="() => SetFilter(ext: e.Key)">
+                                @e.Key.ToUpperInvariant() <span class="filter-count">@e.Value</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        @* --- Results --- *@
+        <div class="search-results">
+            @foreach (var hit in results.Hits)
+            {
+                <div class="search-hit">
+                    <div class="search-hit-head">
+                        <a class="search-hit-title" href="@HitUrl(hit)">@hit.Title</a>
+                        <span class="search-hit-ext">@hit.Extension.ToUpperInvariant()</span>
+                        <span class="search-hit-module">@ModuleLabel(hit.Module)</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(hit.CategoryPath))
+                    {
+                        <div class="search-hit-path">@hit.CategoryPath</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(hit.SnippetHtml))
+                    {
+                        <div class="search-hit-snippet">@((MarkupString)hit.SnippetHtml)</div>
+                    }
+                    else
+                    {
+                        <div class="search-hit-snippet text-muted">
+                            Matched on its title or folder. @(IsScanKind(hit.Extension) ? "This file is a scan — its text isn't readable yet." : "")
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (results.TotalCount > PageSize)
+        {
+            <div class="search-paging">
+                <button class="btn btn-sm btn-outline-secondary" disabled="@(Page <= 1)" @onclick="() => GoToPage(Page - 1)">Previous</button>
+                <span class="text-muted small">Page @Page of @TotalPages</span>
+                <button class="btn btn-sm btn-outline-secondary" disabled="@(Page >= TotalPages)" @onclick="() => GoToPage(Page + 1)">Next</button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private const int PageSize = 25;
+
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+    [SupplyParameterFromQuery(Name = "module")] public string? Module { get; set; }
+    [SupplyParameterFromQuery(Name = "ext")] public string? Ext { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] public int? PageParam { get; set; }
+
+    private int Page => PageParam is > 0 ? PageParam.Value : 1;
+    private int TotalPages => results is null ? 1 : Math.Max(1, (int)Math.Ceiling(results.TotalCount / (double)PageSize));
+
+    private SearchResults? results;
+    private IndexStats? stats;
+    private bool isSearching;
+    private string pendingQuery = string.Empty;
+    private System.Timers.Timer? debounce;
+    private CancellationTokenSource _cts = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        pendingQuery = Query ?? string.Empty;
+        await RunSearchAsync();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { stats = await SearchIndex.GetStatsAsync(_cts.Token); }
+        catch { /* index not ready yet; the page still works */ }
+    }
+
+    private async Task RunSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            results = null;
+            return;
+        }
+
+        isSearching = true;
+        try
+        {
+            results = await SearchIndex.SearchAsync(Query, Module, Ext,
+                skip: (Page - 1) * PageSize, take: PageSize, ct: _cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception)
+        {
+            results = null;
+        }
+        finally
+        {
+            isSearching = false;
+        }
+    }
+
+    // Typing updates the address bar rather than local state, so a search stays shareable
+    // and the browser's back button steps through what you actually looked at.
+    private void OnInput(ChangeEventArgs e)
+    {
+        pendingQuery = e.Value?.ToString() ?? string.Empty;
+        debounce?.Stop();
+        debounce?.Dispose();
+        debounce = new System.Timers.Timer(300) { AutoReset = false };
+        debounce.Elapsed += (_, _) => InvokeAsync(() => Navigate(pendingQuery, Module, Ext, 1));
+        debounce.Start();
+    }
+
+    private void OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            debounce?.Stop();
+            Navigate(pendingQuery, Module, Ext, 1);
+        }
+    }
+
+    private void SetFilter(string? module = null, string? ext = null)
+    {
+        // Passing null means "clear this one", so read the other from the current state.
+        var nextModule = module;
+        var nextExt = ext;
+        if (module is null && ext is not null) nextModule = Module;
+        if (ext is null && module is not null) nextExt = Ext;
+        Navigate(Query ?? string.Empty, nextModule, nextExt, 1);
+    }
+
+    private void GoToPage(int page) => Navigate(Query ?? string.Empty, Module, Ext, page);
+
+    private void Navigate(string q, string? module, string? ext, int page)
+    {
+        var query = new Dictionary<string, object?> { ["q"] = string.IsNullOrWhiteSpace(q) ? null : q };
+        if (!string.IsNullOrEmpty(module)) query["module"] = module;
+        if (!string.IsNullOrEmpty(ext)) query["ext"] = ext;
+        if (page > 1) query["page"] = page;
+
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters("/search", query), replace: true);
+    }
+
+    /// <summary>Carry the query into the viewer so it can highlight what matched.</summary>
+    private string HitUrl(SearchHit hit)
+        => string.IsNullOrWhiteSpace(Query) ? hit.Url : $"{hit.Url}?q={Uri.EscapeDataString(Query)}";
+
+    private static string ModuleLabel(string module)
+        => module == SearchDb.ModuleDoc ? "Documents" : "SOPs";
+
+    private static bool IsScanKind(string ext)
+        => ext is "pdf" or "jpg" or "jpeg" or "png" or "tif" or "tiff";
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        debounce?.Dispose();
+    }
+}

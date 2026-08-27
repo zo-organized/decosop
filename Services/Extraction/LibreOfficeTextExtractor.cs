@@ -103,10 +103,20 @@ public sealed class LibreOfficeTextExtractor : ITextExtractor
         }
     }
 
+    /// <summary>
+    /// Convert one group in a single LibreOffice process.
+    ///
+    /// A batch can hang outright — a password-protected or corrupt document makes the converter
+    /// sit there waiting on a dialog that headless mode never shows. When that happens the files
+    /// it already finished are kept, and the rest are bisected and retried, so one bad document
+    /// costs a few extra seconds instead of taking 39 healthy files down with it.
+    /// </summary>
     private async Task ConvertGroupAsync(
         string soffice, ConvertTarget target, List<string> group,
-        Dictionary<string, ExtractionResult> results, CancellationToken ct)
+        Dictionary<string, ExtractionResult> results, CancellationToken ct, int depth = 0)
     {
+        if (group.Count == 0) return;
+
         var workDir = Path.Combine(Path.GetTempPath(), $"decosop_extract_{Guid.NewGuid():N}");
         var outDir = Path.Combine(workDir, "out");
         var profileDir = Path.Combine(workDir, "profile");
@@ -142,10 +152,13 @@ public sealed class LibreOfficeTextExtractor : ITextExtractor
             var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
 
-            var budget = TimeSpan.FromSeconds(60 + 15 * group.Count);
+            // Measured throughput is ~0.35s/file once the process is up, so this is already
+            // roughly ten times the expected time. A batch that blows through it is stuck, not slow.
+            var budget = TimeSpan.FromSeconds(30 + 3 * group.Count);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(budget);
 
+            var timedOut = false;
             try
             {
                 await process.WaitForExitAsync(timeoutCts.Token);
@@ -153,14 +166,34 @@ public sealed class LibreOfficeTextExtractor : ITextExtractor
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 TryKill(process);
-                _logger.LogWarning("LibreOffice timed out after {Seconds}s converting {Count} file(s)",
-                    budget.TotalSeconds, group.Count);
-                // Whatever finished before the timeout is still collected below.
+                timedOut = true;
             }
 
             await Task.WhenAny(Task.WhenAll(stdout, stderr), Task.Delay(2000, CancellationToken.None));
 
-            CollectOutputs(target, group, outDir, results, ct);
+            // Keep whatever finished. On a clean run anything missing is a genuine per-file
+            // failure; after a timeout it just never got its turn, so leave it for the retry.
+            CollectOutputs(target, group, outDir, results, ct, markMissingAsFailed: !timedOut);
+
+            if (!timedOut) return;
+
+            var stragglers = group.Where(p => !results.ContainsKey(p)).ToList();
+            if (stragglers.Count == 0) return;
+
+            if (stragglers.Count == 1 || depth >= 6)
+            {
+                _logger.LogWarning("LibreOffice could not convert {File} within {Seconds}s; giving up on it",
+                    Path.GetFileName(stragglers[0]), budget.TotalSeconds);
+                foreach (var p in stragglers)
+                    results[p] = ExtractionResult.Failed(Name,
+                        $"LibreOffice timed out after {budget.TotalSeconds:F0}s (file may be password-protected or corrupt)");
+                return;
+            }
+
+            _logger.LogWarning("LibreOffice batch timed out; bisecting {Count} remaining file(s)", stragglers.Count);
+            var mid = stragglers.Count / 2;
+            await ConvertGroupAsync(soffice, target, stragglers.GetRange(0, mid), results, ct, depth + 1);
+            await ConvertGroupAsync(soffice, target, stragglers.GetRange(mid, stragglers.Count - mid), results, ct, depth + 1);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -177,7 +210,7 @@ public sealed class LibreOfficeTextExtractor : ITextExtractor
     }
 
     private void CollectOutputs(ConvertTarget target, List<string> group, string outDir,
-        Dictionary<string, ExtractionResult> results, CancellationToken ct)
+        Dictionary<string, ExtractionResult> results, CancellationToken ct, bool markMissingAsFailed)
     {
         foreach (var source in group)
         {
@@ -186,7 +219,8 @@ public sealed class LibreOfficeTextExtractor : ITextExtractor
             var produced = Path.Combine(outDir, Path.GetFileNameWithoutExtension(source) + target.OutputExtension);
             if (!File.Exists(produced))
             {
-                results[source] = ExtractionResult.Failed(Name, "LibreOffice produced no output for this file");
+                if (markMissingAsFailed)
+                    results[source] = ExtractionResult.Failed(Name, "LibreOffice produced no output for this file");
                 continue;
             }
 
