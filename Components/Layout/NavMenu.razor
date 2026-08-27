@@ -17,6 +17,7 @@
         <a class="navbar-brand" href="">
             <img src="icon.svg" alt="" width="30" height="30" style="margin-right: 0.5rem;" />DecoSOP
         </a>
+        <a class="btn-search-header" href="search" title="Search everything">&#128269;</a>
         <a class="btn-favorites-header" href="favorites" title="All Favorites">&#9733;</a>
     </div>
 </div>
@@ -189,10 +190,12 @@
             {
                 <div class="px-3 py-2 text-muted small">No results found.</div>
             }
-            else if (contentSearchTotal > contentSearchResults.Count)
+            else
             {
                 <NavLink class="nav-link nav-search-all" href="@($"search?q={Uri.EscapeDataString(searchQuery)}")">
-                    See all @contentSearchTotal.ToString("N0") results &rarr;
+                    @(contentSearchTotal > contentSearchResults.Count
+                        ? $"See all {contentSearchTotal:N0} results"
+                        : "Open in full search") &rarr;
                 </NavLink>
             }
         }
@@ -743,8 +746,17 @@
     private string SearchHitUrl(SearchHit hit)
         => $"{hit.Url.TrimStart('/')}?q={Uri.EscapeDataString(searchQuery)}";
 
-    private async Task OnSearchKeyUp()
+    private async Task OnSearchKeyUp(KeyboardEventArgs e)
     {
+        // Enter commits the search: hand off to the full results page, where you can filter,
+        // page through, and share the URL.
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(searchQuery))
+        {
+            debounceTimer?.Stop();
+            Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}");
+            return;
+        }
+
         debounceTimer?.Stop();
         debounceTimer?.Dispose();
 
