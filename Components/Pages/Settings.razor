@@ -137,6 +137,16 @@
                     <span class="doc-meta-label">Unsupported</span>
                     <span>@indexStats.Skipped.ToString("N0")</span>
                 </div>
+                @if (indexStats.Missing > 0)
+                {
+                    <div class="doc-meta-row">
+                        <span class="doc-meta-label">Not found on disk</span>
+                        <span class="text-danger">
+                            @indexStats.Missing.ToString("N0")
+                            <span class="text-muted small">— listed in the library but the file is missing. Check the folder roots above.</span>
+                        </span>
+                    </div>
+                }
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Failed</span>
                     <span>@indexStats.Failed.ToString("N0")</span>

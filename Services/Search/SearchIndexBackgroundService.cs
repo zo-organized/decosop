@@ -138,6 +138,22 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         try
         {
             var work = await DiscoverWorkAsync(ct);
+
+            if (work.Missing.Count > 0)
+            {
+                // Loud on purpose: the overwhelmingly likely cause is a folder root that is
+                // wrong, unmounted, or not yet synced, and that is invisible from the app.
+                _logger.LogWarning(
+                    "Search index: {Count} file(s) listed in the library are not present on disk and " +
+                    "cannot be searched. Check the configured folder roots.", work.Missing.Count);
+            }
+
+            foreach (var (module, fileId, path) in work.Missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                await _index.SetMissingAsync(module, fileId, path, ct);
+            }
+
             if (work.ToIndex.Count == 0 && work.ToRemove.Count == 0)
             {
                 LastRunUtc = DateTime.UtcNow;
@@ -219,7 +235,8 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         string Module, int FileId, string Title, string CategoryPath, string FileName,
         string StoredPath, string FullPath, DateTime MtimeUtc, long Size);
 
-    private sealed record WorkSet(List<PendingFile> ToIndex, List<(string Module, int FileId)> ToRemove);
+    private sealed record WorkSet(List<PendingFile> ToIndex, List<(string Module, int FileId)> ToRemove,
+        List<(string Module, int FileId, string StoredPath)> Missing);
 
     private async Task<WorkSet> DiscoverWorkAsync(CancellationToken ct)
     {
@@ -229,22 +246,24 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         var state = await _index.GetAllStateAsync(ct);
         var toIndex = new List<PendingFile>();
         var live = new HashSet<(string, int)>();
+        var missing = new List<(string Module, int FileId, string StoredPath)>();
 
         await CollectAsync<SopCategory, SopFile>(db, SearchDb.ModuleSop,
-            SopFileService.GetUploadDirectory(), state, toIndex, live, ct);
+            SopFileService.GetUploadDirectory(), state, toIndex, live, missing, ct);
         await CollectAsync<DocumentCategory, OfficeDocument>(db, SearchDb.ModuleDoc,
-            DocumentService.GetUploadDirectory(), state, toIndex, live, ct);
+            DocumentService.GetUploadDirectory(), state, toIndex, live, missing, ct);
 
         // Anything the index still holds but the library no longer lists has been deleted.
         var toRemove = state.Keys.Where(k => !live.Contains(k)).ToList();
 
-        return new WorkSet(toIndex, toRemove);
+        return new WorkSet(toIndex, toRemove, missing);
     }
 
     private static async Task CollectAsync<TCat, TFile>(
         AppDbContext db, string module, string uploadRoot,
         Dictionary<(string Module, int FileId), (string Mtime, long Size, string Status, int Attempts)> state,
-        List<PendingFile> toIndex, HashSet<(string, int)> live, CancellationToken ct)
+        List<PendingFile> toIndex, HashSet<(string, int)> live,
+        List<(string Module, int FileId, string StoredPath)> missing, CancellationToken ct)
         where TCat : class, ICategoryNode
         where TFile : class, IFileNode
     {
@@ -289,11 +308,11 @@ public sealed class SearchIndexBackgroundService : BackgroundService
 
             if (!info.Exists)
             {
-                // The row is still here but its file is gone. Normally the folder reconciler
-                // deletes the row and this never arises, but with folder sync switched off — or
-                // in the window between a deletion and the next reconcile — leaving it indexed
-                // means search happily returns a result that opens onto nothing. Leaving it out
-                // of `live` lets the caller drop it from the index.
+                // The row is still here but its file is gone. It must not stay searchable — the
+                // result would open onto nothing — but it is recorded rather than dropped, so a
+                // mistyped or unmounted folder root cannot masquerade as a complete index.
+                live.Add((module, f.Id));
+                missing.Add((module, f.Id, f.StoredFileName));
                 continue;
             }
 
@@ -311,7 +330,7 @@ public sealed class SearchIndexBackgroundService : BackgroundService
                 // 'pending' means a previous pass claimed this file and was interrupted before
                 // finishing it. Without this clause an unchanged file could sit pending forever,
                 // never indexed and permanently inflating the outstanding count.
-                var stillOwed = known.Status == "pending";
+                var stillOwed = known.Status is "pending" or "missing";
                 if (unchanged && !stillOwed && (known.Status != "failed" || known.Attempts >= MaxAttempts)) continue;
             }
 

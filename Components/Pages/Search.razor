@@ -3,7 +3,6 @@
 @using DecoSOP.Services.Search
 @using Microsoft.AspNetCore.WebUtilities
 @inject SearchIndexService SearchIndex
-@inject SearchIndexBackgroundService Indexer
 @inject NavigationManager Nav
 @inject ILogger<Search> Logger
 @implements IDisposable
@@ -49,6 +48,15 @@
                one that would widen the search again. *@
             <p><button class="btn btn-sm btn-outline-primary" @onclick="ClearFilters">Clear filters and search everything</button></p>
         }
+        @if (IsIndexBuilding)
+        {
+            <div class="alert alert-info search-building">
+                Still reading your documents — <strong>@stats!.Done.ToString("N0")</strong> of
+                <strong>@stats!.Total.ToString("N0")</strong> files indexed
+                (@stats!.PercentComplete.ToString("F0")%). More results will appear as it finishes.
+            </div>
+        }
+
         <p class="text-muted">Try fewer words, or a different term. Scanned documents are searchable by their
             title until text recognition has run over them.</p>
     }
@@ -62,6 +70,15 @@
                 <span class="text-muted small"> — no document contained all of those words, so these match some of them.</span>
             }
         </p>
+
+        @if (IsIndexBuilding)
+        {
+            <div class="alert alert-info search-building">
+                Still reading your documents — <strong>@stats!.Done.ToString("N0")</strong> of
+                <strong>@stats!.Total.ToString("N0")</strong> files indexed
+                (@stats!.PercentComplete.ToString("F0")%). More results will appear as it finishes.
+            </div>
+        }
 
         @* --- Filters --- *@
         @if (results.CountsByModule.Count > 1 || results.CountsByExtension.Count > 1 || Module is not null || Ext is not null)
@@ -121,7 +138,7 @@
                     else
                     {
                         <div class="search-hit-snippet text-muted">
-                            Matched on its title or folder. @(IsScanKind(hit.Extension) ? "This file is a scan — its text isn't readable yet." : "")
+                            Matched on its title or folder.@(IsScanKind(hit.Extension) ? " This file is a scan — its text isn't readable yet." : "")
                         </div>
                     }
                 </div>
@@ -164,6 +181,13 @@
 
     private int TotalPages => results is null ? 1 : Math.Max(1, (int)Math.Ceiling(results.TotalCount / (double)PageSize));
 
+    /// <summary>
+    /// True while the index is still filling. Shown on the results and no-results screens too,
+    /// not just the empty one — a thin result set during a first build is exactly when someone
+    /// needs to be told the library is only part-read.
+    /// </summary>
+    private bool IsIndexBuilding => stats is not null && stats.Total > 0 && stats.PercentComplete < 99.5;
+
     private bool HasFilters => !string.IsNullOrEmpty(Module) || !string.IsNullOrEmpty(Ext);
 
     private SearchResults? results;
@@ -204,6 +228,7 @@
 
         var seq = ++_requestSeq;
         isSearching = true;
+        await RefreshStatsAsync();   // so the build banner reflects now, not page-load time
         try
         {
             var found = await SearchIndex.SearchAsync(Query, Module, Ext,

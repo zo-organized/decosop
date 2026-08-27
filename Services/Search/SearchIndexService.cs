@@ -26,11 +26,14 @@ public sealed record SearchResults(
 
 /// <summary>How complete the index currently is, for the Settings panel.</summary>
 public sealed record IndexStats(
-    int Indexed, int Empty, int Failed, int Skipped, int Pending,
+    int Indexed, int Empty, int Failed, int Skipped, int Pending, int Missing,
     long TotalChars, DateTime? LastIndexedUtc)
 {
-    public int Total => Indexed + Empty + Failed + Skipped + Pending;
-    public int Done => Indexed + Empty + Failed + Skipped;
+    public int Total => Indexed + Empty + Failed + Skipped + Pending + Missing;
+
+    /// <summary>Files whose state is settled — Missing counts, because we know what happened.</summary>
+    public int Done => Total - Pending;
+
     public double PercentComplete => Total == 0 ? 100 : Done * 100.0 / Total;
 }
 
@@ -202,6 +205,48 @@ public sealed class SearchIndexService
         await tx.CommitAsync(ct);
     }
 
+    /// <summary>
+    /// The library still lists this file but its bytes are not on disk. It must not stay
+    /// searchable — the result would open onto nothing — but it must not vanish silently
+    /// either: a mistyped or unmounted folder root would otherwise present as a perfectly
+    /// complete index that happens to be missing half the library.
+    /// </summary>
+    public async Task SetMissingAsync(string module, int fileId, string storedPath, CancellationToken ct = default)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        await using (var del = conn.CreateCommand())
+        {
+            del.Transaction = (SqliteTransaction)tx;
+            del.CommandText = "DELETE FROM SearchIndex WHERE rowid = @rowid";
+            del.Parameters.AddWithValue("@rowid", SearchDb.RowIdFor(module, fileId));
+            await del.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var upsert = conn.CreateCommand())
+        {
+            upsert.Transaction = (SqliteTransaction)tx;
+            upsert.CommandText = """
+                INSERT INTO IndexState (Module, FileId, StoredPath, Status, CharCount, Error, IndexedAt)
+                VALUES (@module, @fileId, @path, 'missing', 0, 'File not found on disk', @now)
+                ON CONFLICT(Module, FileId) DO UPDATE SET
+                    StoredPath = excluded.StoredPath,
+                    Status     = 'missing',
+                    CharCount  = 0,
+                    Error      = excluded.Error,
+                    IndexedAt  = excluded.IndexedAt
+                """;
+            upsert.Parameters.AddWithValue("@module", module);
+            upsert.Parameters.AddWithValue("@fileId", fileId);
+            upsert.Parameters.AddWithValue("@path", storedPath);
+            upsert.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("O"));
+            await upsert.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     /// <summary>Drop a file from the index entirely — it was deleted from the library.</summary>
     public async Task RemoveAsync(string module, int fileId, CancellationToken ct = default)
     {
@@ -297,7 +342,7 @@ public sealed class SearchIndexService
                     Title: reader.GetString(3),
                     CategoryPath: reader.GetString(4),
                     FileName: reader.GetString(5),
-                    SnippetHtml: ToSafeHighlightedHtml(reader.IsDBNull(6) ? "" : reader.GetString(6)),
+                    SnippetHtml: SnippetOrNothing(reader.IsDBNull(6) ? "" : reader.GetString(6)),
                     Rank: reader.GetDouble(7)));
             }
         }
@@ -351,6 +396,19 @@ public sealed class SearchIndexService
             .Replace(MarkOpen, "<mark>")
             .Replace(MarkClose, "</mark>");
 
+    /// <summary>
+    /// Whether FTS5 actually highlighted anything in this snippet. snippet() is asked for the
+    /// Body column, so a hit that matched on Title or CategoryPath comes back as the opening of
+    /// the body with no markers in it — an excerpt containing none of the reader's search terms,
+    /// which reads as a broken result. Detecting that lets the UI explain the match instead.
+    /// </summary>
+    private static bool HasHighlight(string snippet)
+        => snippet.Contains(MarkOpen, StringComparison.Ordinal);
+
+    /// <summary>The highlighted excerpt, or empty when the match was not in the body at all.</summary>
+    private static string SnippetOrNothing(string snippet)
+        => HasHighlight(snippet) ? ToSafeHighlightedHtml(snippet) : string.Empty;
+
     public async Task<IndexStats> GetStatsAsync(CancellationToken ct = default)
     {
         await using var conn = await _db.OpenAsync(ct);
@@ -362,20 +420,21 @@ public sealed class SearchIndexService
               sum(CASE WHEN Status = 'failed'  THEN 1 ELSE 0 END),
               sum(CASE WHEN Status = 'skipped' THEN 1 ELSE 0 END),
               sum(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END),
+              sum(CASE WHEN Status = 'missing' THEN 1 ELSE 0 END),
               sum(CharCount),
               max(IndexedAt)
             FROM IndexState
             """;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
-            return new IndexStats(0, 0, 0, 0, 0, 0, null);
+            return new IndexStats(0, 0, 0, 0, 0, 0, 0, null);
 
         int Get(int i) => reader.IsDBNull(i) ? 0 : reader.GetInt32(i);
-        DateTime? last = reader.IsDBNull(6) ? null
-            : DateTime.TryParse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d : null;
+        DateTime? last = reader.IsDBNull(7) ? null
+            : DateTime.TryParse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d : null;
 
-        return new IndexStats(Get(0), Get(1), Get(2), Get(3), Get(4),
-            reader.IsDBNull(5) ? 0 : reader.GetInt64(5), last);
+        return new IndexStats(Get(0), Get(1), Get(2), Get(3), Get(4), Get(5),
+            reader.IsDBNull(6) ? 0 : reader.GetInt64(6), last);
     }
 
     /// <summary>Files that failed, for the Settings panel's troubleshooting list.</summary>

@@ -33,8 +33,11 @@ public static class TextNormalizer
                 continue;
             }
 
-            // Control characters (and the replacement char from a bad decode) carry no meaning.
-            if (ch < ' ' || ch == '\u007f' || ch == '\ufffd')
+            // Control characters, the replacement char from a bad decode, and private-use
+            // codepoints all carry no meaning. The last of those matter here: Word stores
+            // Wingdings and Symbol glyphs (bullets, ballot boxes, arrows) in U+E000-U+F8FF,
+            // so without this they survive extraction and render as tofu boxes in snippets.
+            if (ch < ' ' || ch == '\u007f' || ch == '\ufffd' || (ch >= '\ue000' && ch <= '\uf8ff'))
             {
                 pendingSpace = true;
                 continue;
