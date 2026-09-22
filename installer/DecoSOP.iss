@@ -125,10 +125,11 @@ Type: filesandordirs; Name: "{app}\wwwroot"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\port.config"
 Type: files; Name: "{app}\update-config.json"
-; Document-sync artifacts created post-install by Configure-DecoSOP-Sync (not tracked by [Files])
-Type: files; Name: "{app}\rclone.exe"
-Type: files; Name: "{app}\rclone.conf"
-Type: files; Name: "{app}\rclone-bisync.ps1"
+; NOTE: rclone.exe / rclone.conf / rclone-bisync.ps1 are deliberately NOT deleted.
+; The upgrade path runs this uninstaller silently, and deleting them would destroy the
+; authenticated sync configuration on every upgrade (this killed sync in production on
+; the 2026-08-27 v2.1.0 upgrade). They are small and harmless to leave on a real uninstall.
+Type: files; Name: "{app}\rclone.conf.old*"
 Type: files; Name: "{app}\appsettings.Production.json"
 ; The full-text search index is derived data — it rebuilds itself from the documents — so
 ; unlike the database it is not worth preserving across an uninstall.
@@ -154,6 +155,7 @@ var
   AutoInstallTimeLabel: TNewStaticText;
   AutoInstallTimeCombo: TNewComboBox;
   IsUpgradeInstall: Boolean;
+  SyncBackupDir: String;
   LibreOfficePage: TWizardPage;
   LibreOfficeCheckbox: TNewCheckBox;
   LibreOfficeStatusLabel: TNewStaticText;
@@ -330,6 +332,76 @@ begin
   RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', Result);
 end;
 
+// ---- Sync-config preservation across upgrades ----
+// The upgrade path runs the PREVIOUS version's uninstaller, which removes the
+// "DecoSOP Document Sync" scheduled task and (in some versions) the rclone files
+// that Configure-DecoSOP-Sync created. Back those files up before the silent
+// uninstall and restore everything - files and task - after the new install.
+// (The 2026-08-27 v2.1.0 upgrade silently killed document sync in production
+// exactly this way.)
+
+function GetInstallLocation: String;
+var
+  UninstallKey: String;
+begin
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3C0-50F1-4A2B-B8E9-DecoSOP-1000}}_is1';
+  Result := '';
+  RegQueryStringValue(HKLM, UninstallKey, 'InstallLocation', Result);
+  if Result = '' then
+    Result := 'C:\DecoSOP';
+  Result := RemoveBackslash(Result);
+end;
+
+procedure BackupSyncConfig;
+var
+  I: Integer;
+  AppDir: String;
+  Names: array[0..2] of String;
+begin
+  Names[0] := 'rclone.conf';
+  Names[1] := 'rclone-bisync.ps1';
+  Names[2] := 'rclone.exe';
+  AppDir := GetInstallLocation;
+  SyncBackupDir := ExpandConstant('{tmp}\sync-backup');
+  ForceDirectories(SyncBackupDir);
+  for I := 0 to 2 do
+    if FileExists(AppDir + '\' + Names[I]) then
+      CopyFile(AppDir + '\' + Names[I], SyncBackupDir + '\' + Names[I], False);
+end;
+
+procedure RestoreSyncConfig;
+var
+  I, ResultCode: Integer;
+  AppDir, Src, Dest: String;
+  Names: array[0..2] of String;
+begin
+  AppDir := ExpandConstant('{app}');
+  if SyncBackupDir <> '' then
+  begin
+    Names[0] := 'rclone.conf';
+    Names[1] := 'rclone-bisync.ps1';
+    Names[2] := 'rclone.exe';
+    for I := 0 to 2 do
+    begin
+      Src := SyncBackupDir + '\' + Names[I];
+      Dest := AppDir + '\' + Names[I];
+      if FileExists(Src) and (not FileExists(Dest)) then
+        CopyFile(Src, Dest, False);
+    end;
+  end;
+  // Re-register the sync task the old uninstaller removed. Skip if it survived
+  // (preserves a custom interval); default to the setup tool's 5 minutes.
+  if FileExists(AppDir + '\rclone-bisync.ps1') then
+  begin
+    if (not Exec('schtasks.exe', '/Query /TN "DecoSOP Document Sync"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode))
+       or (ResultCode <> 0) then
+      Exec('schtasks.exe',
+        '/Create /TN "DecoSOP Document Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"'
+        + AppDir + '\rclone-bisync.ps1\"" /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST /F',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 function InitializeSetup: Boolean;
 var
   InstalledVersion: String;
@@ -378,8 +450,11 @@ begin
       Exit;
     end;
 
-    // Yes = Upgrade/Reinstall: silently remove old service/firewall, then continue
+    // Yes = Upgrade/Reinstall: silently remove old service/firewall, then continue.
+    // The old uninstaller also removes the document-sync task (and possibly the rclone
+    // files), so preserve the sync config first; RestoreSyncConfig puts it all back.
     IsUpgradeInstall := True;
+    BackupSyncConfig;
     if UninstallString <> '' then
     begin
       if (Length(UninstallString) > 1) and (UninstallString[1] = '"') then
@@ -742,6 +817,10 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
+    // Put back the sync config + scheduled task the upgrade's silent uninstall removed
+    if IsUpgradeInstall then
+      RestoreSyncConfig;
+
     // Download and install LibreOffice if selected
     if ShouldInstallLibreOffice then
     begin
