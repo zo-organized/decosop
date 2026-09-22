@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.StaticFiles;
+
 namespace DecoSOP.Services;
 
 /// <summary>
@@ -7,69 +9,30 @@ namespace DecoSOP.Services;
 /// </summary>
 public static class FileScanUtil
 {
+    private static readonly EnumerationOptions Recurse = new() { RecurseSubdirectories = true };
+
     /// <summary>
     /// Recursively enumerate every file under baseDir, returning each file's relative path
-    /// (forward slashes) and absolute path. No folder or extension filtering — the index is
-    /// a 1:1 mirror of the folder. Only ~$ Office lock files (transient, not real content)
-    /// are skipped. Reads metadata only.
+    /// (forward slashes) and absolute path, ordered by relative path. No folder or extension
+    /// filtering — the index is a 1:1 mirror of the folder. Only ~$ Office lock files
+    /// (transient, not real content) are skipped; inaccessible directories are ignored.
     /// </summary>
     public static IEnumerable<(string RelPath, string FullPath)> WalkFiles(string baseDir)
-    {
-        var baseInfo = new DirectoryInfo(baseDir);
-        foreach (var (rel, full) in WalkDirectory(baseInfo, baseInfo.FullName))
-            yield return (rel.Replace('\\', '/'), full);
-    }
-
-    private static IEnumerable<(string RelPath, string FullPath)> WalkDirectory(DirectoryInfo dir, string basePath)
-    {
-        FileInfo[] files;
-        try { files = dir.GetFiles(); }
-        catch (UnauthorizedAccessException) { yield break; }
-
-        foreach (var file in files.OrderBy(f => f.Name))
-        {
-            if (file.Name.StartsWith("~$"))
-                continue; // transient Office lock file (not real content; OneDrive doesn't sync these)
-            var relPath = Path.GetRelativePath(basePath, file.FullName);
-            yield return (relPath, file.FullName);
-        }
-
-        DirectoryInfo[] subdirs;
-        try { subdirs = dir.GetDirectories(); }
-        catch (UnauthorizedAccessException) { yield break; }
-
-        foreach (var subdir in subdirs.OrderBy(d => d.Name))
-        {
-            foreach (var item in WalkDirectory(subdir, basePath))
-                yield return item;
-        }
-    }
+        => Directory.EnumerateFiles(baseDir, "*", Recurse)
+            .Where(f => !Path.GetFileName(f).StartsWith("~$"))
+            .Select(f => (RelPath: Path.GetRelativePath(baseDir, f).Replace('\\', '/'), FullPath: f))
+            .OrderBy(t => t.RelPath, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Recursively enumerate non-skipped subdirectories under baseDir, returning each
-    /// as a list of name segments (the category chain) from the root. Folder names are
-    /// used verbatim so categories match the real folders exactly.
+    /// Recursively enumerate subdirectories under baseDir, each as a list of name segments
+    /// (the category chain) from the root. Folder names are used verbatim so categories
+    /// match the real folders exactly.
     /// </summary>
     public static IEnumerable<IReadOnlyList<string>> WalkDirectoryChains(string baseDir)
-    {
-        var baseInfo = new DirectoryInfo(baseDir);
-        return WalkChains(baseInfo, new List<string>());
-    }
-
-    private static IEnumerable<IReadOnlyList<string>> WalkChains(DirectoryInfo dir, List<string> prefix)
-    {
-        DirectoryInfo[] subdirs;
-        try { subdirs = dir.GetDirectories(); }
-        catch (UnauthorizedAccessException) { yield break; }
-
-        foreach (var subdir in subdirs.OrderBy(d => d.Name))
-        {
-            var chain = new List<string>(prefix) { subdir.Name };
-            yield return chain;
-            foreach (var nested in WalkChains(subdir, chain))
-                yield return nested;
-        }
-    }
+        => Directory.EnumerateDirectories(baseDir, "*", Recurse)
+            .Select(d => Path.GetRelativePath(baseDir, d).Replace('\\', '/'))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .Select(IReadOnlyList<string> (p) => p.Split('/'));
 
     /// <summary>File title = the file name without its extension, verbatim (the extension shows as a badge).</summary>
     public static string CleanTitle(string filename) => Path.GetFileNameWithoutExtension(filename);
@@ -83,28 +46,16 @@ public static class FileScanUtil
         return parts[..^1].ToList();
     }
 
-    public static string GetContentType(string filename)
+    private static readonly FileExtensionContentTypeProvider Mime = CreateMime();
+
+    private static FileExtensionContentTypeProvider CreateMime()
     {
-        var ext = Path.GetExtension(filename).ToLowerInvariant();
-        return ext switch
-        {
-            ".pdf" => "application/pdf",
-            ".doc" => "application/msword",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".xls" => "application/vnd.ms-excel",
-            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".ppt" => "application/vnd.ms-powerpoint",
-            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".txt" => "text/plain",
-            ".csv" => "text/csv",
-            ".rtf" => "application/rtf",
-            ".png" => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".zip" => "application/zip",
-            ".odt" => "application/vnd.oasis.opendocument.text",
-            ".ods" => "application/vnd.oasis.opendocument.spreadsheet",
-            _ => "application/octet-stream"
-        };
+        var p = new FileExtensionContentTypeProvider();
+        p.Mappings.TryAdd(".odt", "application/vnd.oasis.opendocument.text");
+        p.Mappings.TryAdd(".ods", "application/vnd.oasis.opendocument.spreadsheet");
+        return p;
     }
+
+    public static string GetContentType(string filename)
+        => Mime.TryGetContentType(filename, out var type) ? type : "application/octet-stream";
 }

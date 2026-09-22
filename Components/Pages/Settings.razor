@@ -3,7 +3,6 @@
 @using DecoSOP.Services
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<AppDbContext> DbFactory
-@inject AppDbContext Db
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject UpdateService UpdateService
@@ -210,7 +209,7 @@
                 <button class="btn btn-sm btn-danger" @onclick="ImportDatabase" disabled="@isImporting">
                     @(isImporting ? "Importing..." : "Replace Database")
                 </button>
-                <span class="text-muted small ms-2">@importFile.Name (@FormatSize(importFile.Size))</span>
+                <span class="text-muted small ms-2">@importFile.Name (@SopFileService.FormatFileSize(importFile.Size))</span>
             </div>
         }
     </div>
@@ -482,7 +481,7 @@
 
         stats = new DbStats
         {
-            DbFileSize = FormatSize(fileSize),
+            DbFileSize = SopFileService.FormatFileSize(fileSize),
             SopFileCategoryCount = await db.SopCategories.CountAsync(),
             SopFileCount = await db.SopFiles.CountAsync(),
             DocCategoryCount = await db.DocumentCategories.CountAsync(),
@@ -548,13 +547,6 @@
         {
             isImporting = false;
         }
-    }
-
-    private static string FormatSize(long bytes)
-    {
-        if (bytes < 1024) return $"{bytes} B";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-        return $"{bytes / (1024.0 * 1024.0):F1} MB";
     }
 
     private class DbStats

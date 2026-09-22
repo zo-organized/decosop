@@ -22,9 +22,6 @@ public sealed class TextExtractionService
                 _byExtension[ext] = extractor;
     }
 
-    /// <summary>Every extension the pipeline knows how to read, for reporting and diagnostics.</summary>
-    public IReadOnlyCollection<string> SupportedExtensions => _byExtension.Keys;
-
     /// <summary>The extractor that would handle this file, or null if the type isn't supported.</summary>
     public ITextExtractor? ResolveFor(string fileNameOrPath)
         => _byExtension.GetValueOrDefault(Path.GetExtension(fileNameOrPath));

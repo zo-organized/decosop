@@ -24,9 +24,6 @@ public class FolderSyncBackgroundService : BackgroundService
     private Timer? _docDebounce;
     private CancellationToken _stopping;
 
-    /// <summary>Whether folder sync is enabled in configuration.</summary>
-    public bool Enabled => _opts.Enabled;
-
     /// <summary>UTC time of the most recent completed reconcile pass (either module), or null if none yet.</summary>
     public DateTime? LastSyncUtc { get; private set; }
     public FolderReconciler.Result LastSopResult { get; private set; }

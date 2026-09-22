@@ -15,11 +15,11 @@ public sealed class UpdateService : IDisposable
     private readonly HttpClient _http;
     private readonly Timer _timer;
 
+    private const string ReleasesApiUrl = "https://api.github.com/repos/zo-organized/DecoSOP/releases/latest";
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
+
     // Configurable via update-config.json next to the exe
     private bool _enabled = true;
-    private string _repoOwner = "zo-organized";
-    private string _repoName = "DecoSOP";
-    private TimeSpan _checkInterval = TimeSpan.FromHours(24);
     private string? _skippedVersion;
     private bool _autoInstall;
     private string _autoInstallTime = "02:00";
@@ -27,10 +27,8 @@ public sealed class UpdateService : IDisposable
 
     public string CurrentVersion { get; }
     public string? NewVersion { get; private set; }
-    public string? ReleaseUrl { get; private set; }
     public string? DownloadUrl { get; private set; }
     public string? ZipUrl { get; private set; }
-    public string? ReleaseNotes { get; private set; }
     public bool UpdateAvailable => NewVersion is not null;
 
     // Download / install state
@@ -57,11 +55,11 @@ public sealed class UpdateService : IDisposable
 
         LoadConfig();
 
-        // Initial check after 30 seconds, then every _checkInterval
+        // Initial check after 30 seconds, then every CheckInterval
         _timer = new Timer(async _ => await PeriodicCheckAsync(),
             null,
             _enabled ? TimeSpan.FromSeconds(30) : Timeout.InfiniteTimeSpan,
-            _enabled ? _checkInterval : Timeout.InfiniteTimeSpan);
+            _enabled ? CheckInterval : Timeout.InfiniteTimeSpan);
     }
 
     private async Task PeriodicCheckAsync()
@@ -92,8 +90,7 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            var url = $"https://api.github.com/repos/{_repoOwner}/{_repoName}/releases/latest";
-            var response = await _http.GetAsync(url);
+            var response = await _http.GetAsync(ReleasesApiUrl);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -105,7 +102,6 @@ public sealed class UpdateService : IDisposable
 
             var tagName = json.GetProperty("tag_name").GetString()?.TrimStart('v') ?? "";
             var htmlUrl = json.GetProperty("html_url").GetString() ?? "";
-            var body = json.TryGetProperty("body", out var bodyProp) ? bodyProp.GetString() ?? "" : "";
 
             // Find installer and zip assets separately
             string? installerUrl = null;
@@ -140,19 +136,15 @@ public sealed class UpdateService : IDisposable
             if (remoteVer > localVer && tagName != _skippedVersion)
             {
                 NewVersion = tagName;
-                ReleaseUrl = htmlUrl;
                 DownloadUrl = installerUrl ?? zipUrl ?? htmlUrl;
                 ZipUrl = zipUrl;
-                ReleaseNotes = body.Length > 500 ? body[..500] + "..." : body;
                 _logger.LogInformation("Update available: {Version}", tagName);
             }
             else
             {
                 NewVersion = null;
-                ReleaseUrl = null;
                 DownloadUrl = null;
                 ZipUrl = null;
-                ReleaseNotes = null;
             }
 
             OnUpdateChecked?.Invoke();
@@ -254,17 +246,14 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    /// <summary>Best-effort recursive delete that tolerates a briefly-locked file (antivirus, etc.).</summary>
+    /// <summary>Best-effort recursive delete that tolerates a briefly-locked file (antivirus, etc.).
+    /// Gives up quietly — the unique per-run folder means we don't depend on this succeeding.</summary>
     private static async Task TryDeleteDirectoryAsync(string dir)
     {
         if (!Directory.Exists(dir)) return;
-        for (int i = 0; i < 5; i++)
-        {
-            try { Directory.Delete(dir, recursive: true); return; }
-            catch (IOException) { await Task.Delay(500); }
-            catch (UnauthorizedAccessException) { await Task.Delay(500); }
-        }
-        // Give up quietly — the unique per-run folder means we don't depend on this succeeding.
+        try { await RetryOnLockAsync(() => Directory.Delete(dir, recursive: true), attempts: 5, delayMs: 500); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>Run a file operation, retrying through transient locks (e.g. antivirus scanning a fresh file).</summary>
@@ -355,10 +344,8 @@ Stop-Transcript
     {
         _skippedVersion = version;
         NewVersion = null;
-        ReleaseUrl = null;
         DownloadUrl = null;
         ZipUrl = null;
-        ReleaseNotes = null;
         SaveConfig();
         OnUpdateChecked?.Invoke();
     }
@@ -366,10 +353,8 @@ Stop-Transcript
     public void Dismiss()
     {
         NewVersion = null;
-        ReleaseUrl = null;
         DownloadUrl = null;
         ZipUrl = null;
-        ReleaseNotes = null;
         OnUpdateChecked?.Invoke();
     }
 
@@ -382,7 +367,7 @@ Stop-Transcript
 
         // Restart or stop the timer
         if (_enabled)
-            _timer.Change(TimeSpan.FromSeconds(5), _checkInterval);
+            _timer.Change(TimeSpan.FromSeconds(5), CheckInterval);
         else
             _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
@@ -409,12 +394,6 @@ Stop-Transcript
 
             if (json.TryGetProperty("enabled", out var enabled))
                 _enabled = enabled.GetBoolean();
-            if (json.TryGetProperty("repoOwner", out var owner))
-                _repoOwner = owner.GetString() ?? _repoOwner;
-            if (json.TryGetProperty("repoName", out var name))
-                _repoName = name.GetString() ?? _repoName;
-            if (json.TryGetProperty("checkIntervalHours", out var hours))
-                _checkInterval = TimeSpan.FromHours(hours.GetInt32());
             if (json.TryGetProperty("skippedVersion", out var skipped))
                 _skippedVersion = skipped.GetString();
             if (json.TryGetProperty("autoInstall", out var autoInstall))
@@ -436,9 +415,6 @@ Stop-Transcript
             var config = new
             {
                 enabled = _enabled,
-                repoOwner = _repoOwner,
-                repoName = _repoName,
-                checkIntervalHours = (int)_checkInterval.TotalHours,
                 skippedVersion = _skippedVersion,
                 autoInstall = _autoInstall,
                 autoInstallTime = _autoInstallTime

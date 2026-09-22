@@ -27,11 +27,6 @@ public sealed record ExtractionResult(
     string Extractor,
     string? Error = null)
 {
-    public bool HasText => Status == ExtractionStatus.Ok && Text.Length > 0;
-
-    /// <summary>Whether OCR could plausibly recover text this extractor couldn't reach.</summary>
-    public bool IsOcrCandidate => Status == ExtractionStatus.Empty;
-
     public static ExtractionResult FromText(string? text, string extractor)
         => string.IsNullOrWhiteSpace(text)
             ? new ExtractionResult(ExtractionStatus.Empty, string.Empty, extractor)
