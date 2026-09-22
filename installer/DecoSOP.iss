@@ -11,7 +11,7 @@
 ;   7. Import SOP uploads dir       (only if Import selected, optional — legacy uploads)
 ;   8. Import Documents uploads dir (only if Import selected, optional — legacy uploads)
 ;   9. Auto-Update Preference (checks, auto-install, time picker)
-;  10. LibreOffice (optional download + install for Office doc previews)
+;  10. LibreOffice (optional download + install: Office doc previews + search indexing)
 ;  11. Shortcuts (desktop icon)
 ;  12. Ready to Install / Installing / Finish (open in browser)
 ;
@@ -20,7 +20,10 @@
 ; The category/file index is rebuilt from those folders automatically on startup.
 
 #define MyAppName "DecoSOP"
-#define MyAppVersion "2.0.2"
+; Release builds pass /DMyAppVersion from the git tag; this is the local-build fallback.
+#ifndef MyAppVersion
+  #define MyAppVersion "2.2.0"
+#endif
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/zo-organized/decosop"
 #define MyAppExeName "DecoSOP.exe"
@@ -55,7 +58,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Published app files — excludes DB and upload dirs (user data)
-Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,doc-uploads,sop-uploads"
+Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,decosop-search.db,doc-uploads,sop-uploads"
 ; Document-sync setup script (SharePoint/OneDrive via rclone, or a local folder/share)
 Source: "Configure-DecoSOP-Sync.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -125,11 +128,17 @@ Type: filesandordirs; Name: "{app}\wwwroot"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\port.config"
 Type: files; Name: "{app}\update-config.json"
-; Document-sync artifacts created post-install by Configure-DecoSOP-Sync (not tracked by [Files])
-Type: files; Name: "{app}\rclone.exe"
-Type: files; Name: "{app}\rclone.conf"
-Type: files; Name: "{app}\rclone-bisync.ps1"
+; NOTE: rclone.exe / rclone.conf / rclone-bisync.ps1 are deliberately NOT deleted.
+; The upgrade path runs this uninstaller silently, and deleting them would destroy the
+; authenticated sync configuration on every upgrade (this killed sync in production on
+; the 2026-08-27 v2.1.0 upgrade). They are small and harmless to leave on a real uninstall.
+Type: files; Name: "{app}\rclone.conf.old*"
 Type: files; Name: "{app}\appsettings.Production.json"
+; The full-text search index is derived data — it rebuilds itself from the documents — so
+; unlike the database it is not worth preserving across an uninstall.
+Type: files; Name: "{app}\decosop-search.db"
+Type: files; Name: "{app}\decosop-search.db-wal"
+Type: files; Name: "{app}\decosop-search.db-shm"
 ; NOTE: the database, uploads, and the local {app}\sync mirror are intentionally preserved
 ; (sync is just a rebuildable copy of OneDrive; delete it by hand if you want the space back)
 
@@ -149,6 +158,7 @@ var
   AutoInstallTimeLabel: TNewStaticText;
   AutoInstallTimeCombo: TNewComboBox;
   IsUpgradeInstall: Boolean;
+  SyncBackupDir: String;
   LibreOfficePage: TWizardPage;
   LibreOfficeCheckbox: TNewCheckBox;
   LibreOfficeStatusLabel: TNewStaticText;
@@ -325,6 +335,76 @@ begin
   RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', Result);
 end;
 
+// ---- Sync-config preservation across upgrades ----
+// The upgrade path runs the PREVIOUS version's uninstaller, which removes the
+// "DecoSOP Document Sync" scheduled task and (in some versions) the rclone files
+// that Configure-DecoSOP-Sync created. Back those files up before the silent
+// uninstall and restore everything - files and task - after the new install.
+// (The 2026-08-27 v2.1.0 upgrade silently killed document sync in production
+// exactly this way.)
+
+function GetInstallLocation: String;
+var
+  UninstallKey: String;
+begin
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3C0-50F1-4A2B-B8E9-DecoSOP-1000}}_is1';
+  Result := '';
+  RegQueryStringValue(HKLM, UninstallKey, 'InstallLocation', Result);
+  if Result = '' then
+    Result := 'C:\DecoSOP';
+  Result := RemoveBackslash(Result);
+end;
+
+procedure BackupSyncConfig;
+var
+  I: Integer;
+  AppDir: String;
+  Names: array[0..2] of String;
+begin
+  Names[0] := 'rclone.conf';
+  Names[1] := 'rclone-bisync.ps1';
+  Names[2] := 'rclone.exe';
+  AppDir := GetInstallLocation;
+  SyncBackupDir := ExpandConstant('{tmp}\sync-backup');
+  ForceDirectories(SyncBackupDir);
+  for I := 0 to 2 do
+    if FileExists(AppDir + '\' + Names[I]) then
+      CopyFile(AppDir + '\' + Names[I], SyncBackupDir + '\' + Names[I], False);
+end;
+
+procedure RestoreSyncConfig;
+var
+  I, ResultCode: Integer;
+  AppDir, Src, Dest: String;
+  Names: array[0..2] of String;
+begin
+  AppDir := ExpandConstant('{app}');
+  if SyncBackupDir <> '' then
+  begin
+    Names[0] := 'rclone.conf';
+    Names[1] := 'rclone-bisync.ps1';
+    Names[2] := 'rclone.exe';
+    for I := 0 to 2 do
+    begin
+      Src := SyncBackupDir + '\' + Names[I];
+      Dest := AppDir + '\' + Names[I];
+      if FileExists(Src) and (not FileExists(Dest)) then
+        CopyFile(Src, Dest, False);
+    end;
+  end;
+  // Re-register the sync task the old uninstaller removed. Skip if it survived
+  // (preserves a custom interval); default to the setup tool's 5 minutes.
+  if FileExists(AppDir + '\rclone-bisync.ps1') then
+  begin
+    if (not Exec('schtasks.exe', '/Query /TN "DecoSOP Document Sync"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode))
+       or (ResultCode <> 0) then
+      Exec('schtasks.exe',
+        '/Create /TN "DecoSOP Document Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"'
+        + AppDir + '\rclone-bisync.ps1\"" /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST /F',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 function InitializeSetup: Boolean;
 var
   InstalledVersion: String;
@@ -373,8 +453,11 @@ begin
       Exit;
     end;
 
-    // Yes = Upgrade/Reinstall: silently remove old service/firewall, then continue
+    // Yes = Upgrade/Reinstall: silently remove old service/firewall, then continue.
+    // The old uninstaller also removes the document-sync task (and possibly the rclone
+    // files), so preserve the sync config first; RestoreSyncConfig puts it all back.
     IsUpgradeInstall := True;
+    BackupSyncConfig;
     if UninstallString <> '' then
     begin
       if (Length(UninstallString) > 1) and (UninstallString[1] = '"') then
@@ -657,13 +740,13 @@ begin
     Enabled := False;
   end;
 
-  // Page 9: LibreOffice (after auto-update — optional download for Office doc previews)
+  // Page 9: LibreOffice (after auto-update — powers Office previews AND legacy .doc search indexing)
   LibreOfficeDetected := IsLibreOfficeInstalled;
 
   LibreOfficePage := CreateCustomPage(
     UpdatePage.ID,
     'Office Document Previews',
-    'LibreOffice enables inline previews of Word, Excel, and PowerPoint files.');
+    'LibreOffice lets DecoSOP preview Office files and search inside older ones.');
 
   if LibreOfficeDetected then
   begin
@@ -672,7 +755,8 @@ begin
       Parent := LibreOfficePage.Surface;
       Caption := 'LibreOffice is already installed on this computer.' + #13#10 + #13#10 +
                  'Office documents (Word, Excel, PowerPoint) will be converted to PDF' + #13#10 +
-                 'automatically for inline preview in the browser.' + #13#10 + #13#10 +
+                 'automatically for inline preview in the browser, and the contents of' + #13#10 +
+                 'older .doc files will be included in search results.' + #13#10 + #13#10 +
                  'No additional action is needed.';
       Left := 0;
       Top := 0;
@@ -686,10 +770,13 @@ begin
     with TNewStaticText.Create(LibreOfficePage) do
     begin
       Parent := LibreOfficePage.Surface;
-      Caption := 'DecoSOP can show inline previews of Office documents (Word, Excel,' + #13#10 +
-                 'PowerPoint) by converting them to PDF using LibreOffice.' + #13#10 + #13#10 +
-                 'Without LibreOffice, Office documents will still be available for' + #13#10 +
-                 'download but cannot be previewed in the browser.' + #13#10 + #13#10 +
+      Caption := 'LibreOffice does two jobs for DecoSOP. It converts Office documents' + #13#10 +
+                 '(Word, Excel, PowerPoint) to PDF so they preview in the browser, and it' + #13#10 +
+                 'reads older .doc files so their contents can be searched.' + #13#10 + #13#10 +
+                 'Without it, Office documents can still be downloaded, and older .doc' + #13#10 +
+                 'files can still be found by name — but you will not be able to search' + #13#10 +
+                 'inside them. In a long-established library that is often a large share' + #13#10 +
+                 'of the collection.' + #13#10 + #13#10 +
                  'LibreOffice is free and open-source (approx. 350 MB download).';
       Left := 0;
       Top := 0;
@@ -733,6 +820,10 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
+    // Put back the sync config + scheduled task the upgrade's silent uninstall removed
+    if IsUpgradeInstall then
+      RestoreSyncConfig;
+
     // Download and install LibreOffice if selected
     if ShouldInstallLibreOffice then
     begin

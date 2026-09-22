@@ -105,7 +105,9 @@ public static class PdfConversionService
             var stderr = await process.StandardError.ReadToEndAsync();
 
             // Wait up to 60 seconds for conversion
-            var completed = await WaitForExitAsync(process, TimeSpan.FromSeconds(60));
+            bool completed;
+            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60)); completed = true; }
+            catch (TimeoutException) { completed = false; }
 
             // Clean up temp profile
             try { if (Directory.Exists(profileDir)) Directory.Delete(profileDir, true); } catch { }
@@ -150,20 +152,6 @@ public static class PdfConversionService
         }
     }
 
-    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            await process.WaitForExitAsync(cts.Token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-    }
-
     private static string? FindSoffice()
     {
         if (_sofficePath is not null)
@@ -186,33 +174,15 @@ public static class PdfConversionService
         }
 
         // Try PATH
-        try
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            var psi = new ProcessStartInfo
+            var candidate = Path.Combine(dir.Trim(), "soffice.exe");
+            if (File.Exists(candidate))
             {
-                FileName = "where",
-                Arguments = "soffice",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
-            using var process = Process.Start(psi);
-            if (process is not null)
-            {
-                var output = process.StandardOutput.ReadToEnd().Trim();
-                process.WaitForExit(5000);
-                if (!string.IsNullOrEmpty(output))
-                {
-                    var firstLine = output.Split('\n')[0].Trim();
-                    if (File.Exists(firstLine))
-                    {
-                        _sofficePath = firstLine;
-                        return firstLine;
-                    }
-                }
+                _sofficePath = candidate;
+                return candidate;
             }
         }
-        catch { }
 
         return null;
     }

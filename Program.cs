@@ -2,15 +2,26 @@ using DecoSOP.Components;
 using DecoSOP.Data;
 using DecoSOP.Models;
 using DecoSOP.Services;
+using DecoSOP.Services.Extraction;
+using DecoSOP.Services.Search;
 using Microsoft.EntityFrameworkCore;
+
+// Each module's local-uploads fallback folder (used when no SyncRoot is configured).
+SopFileService.FallbackDirName = "sop-uploads";
+DocumentService.FallbackDirName = "doc-uploads";
+
+// Diagnostic mode: run the text-extraction pipeline over a folder and report coverage by file
+// type, without starting the web host. Used to validate the search index against a real corpus.
+//   DecoSOP.exe extract-report [folder] [maxFilesPerType]
+if (args.Length > 0 && args[0].Equals("extract-report", StringComparison.OrdinalIgnoreCase))
+{
+    SopFileService.DataDirectory = AppContext.BaseDirectory;
+    return await ExtractionReport.RunAsync(args);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseWindowsService();
-
-// Machine-local overrides (kept out of source control) — holds the Azure SQL "InventoryDb"
-// connection string. Copy appsettings.Local.template.json → appsettings.Local.json and fill it in.
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 // Read port from port.config if it exists (written by installer), otherwise default to 5098
 var port = "5098";
@@ -41,8 +52,7 @@ builder.Services.AddResponseCompression(o =>
     o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
 });
 
-// In development, use project root so import scripts and the app share the same DB.
-// In production (Windows Service), use the exe directory.
+// In development, use the project root; in production (Windows Service), the exe directory.
 var dataDir = builder.Environment.IsDevelopment()
     ? builder.Environment.ContentRootPath
     : AppContext.BaseDirectory;
@@ -69,21 +79,30 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}").AddInterceptors(sqlitePragmas), ServiceLifetime.Scoped);
 
-// Inventory module → Azure SQL (its own context). SOPs/Docs/preferences stay in the local SQLite AppDbContext above.
-var inventoryConn = builder.Configuration.GetConnectionString("InventoryDb")
-    ?? throw new InvalidOperationException(
-        "Connection string 'InventoryDb' is not configured. Add it under \"ConnectionStrings\" in appsettings.");
-builder.Services.AddDbContext<InventoryDbContext>(options =>
-    options.UseSqlServer(inventoryConn, sql => sql.EnableRetryOnFailure()));
-
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientIdentityService>();
 builder.Services.AddScoped<UserPreferenceService>();
 builder.Services.AddScoped<SopFileService>();
 builder.Services.AddScoped<DocumentService>();
-builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
+
+// Content search: text extraction. Extractors are stateless, so they're singletons.
+builder.Services.AddSingleton<ITextExtractor, PlainTextExtractor>();
+builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
+builder.Services.AddSingleton<ITextExtractor, OpenXmlWordExtractor>();
+builder.Services.AddSingleton<ITextExtractor, SpreadsheetExtractor>();
+builder.Services.AddSingleton<ITextExtractor, LibreOfficeTextExtractor>();
+builder.Services.AddSingleton<TextExtractionService>();
+
+// Content search: the index itself lives in its own SQLite file next to decosop.db. It is
+// entirely derived data — delete it and it rebuilds — so it stays out of the DB export and
+// away from the main database's single writer.
+var searchDbPath = Path.Combine(dataDir, "decosop-search.db");
+builder.Services.AddSingleton(sp => new SearchDb(searchDbPath, sp.GetRequiredService<ILogger<SearchDb>>()));
+builder.Services.AddSingleton<SearchIndexService>();
+builder.Services.AddSingleton<SearchIndexBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SearchIndexBackgroundService>());
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SyncNotificationService>();
 builder.Services.AddSingleton<FolderSyncBackgroundService>();
@@ -91,291 +110,22 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<FolderSyncBackgrou
 
 var app = builder.Build();
 
-// Auto-create/migrate the database on startup
+// Auto-create the database on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
-    // Schema migrations for existing databases (EnsureCreated only creates new DBs)
     var conn = db.Database.GetDbConnection();
     await conn.OpenAsync();
-
-    // Enable WAL once — it persists in the DB file header, so every later connection opens in WAL
-    // automatically (readers don't block the single writer). Per-connection busy_timeout is handled
-    // by SqlitePragmaInterceptor. Setting WAL per-connection instead would be needlessly expensive.
-    using (var walCmd = conn.CreateCommand())
-    {
-        walCmd.CommandText = "PRAGMA journal_mode=WAL;";
-        await walCmd.ExecuteNonQueryAsync();
-    }
-
-    // One-time removal of the legacy Web SOPs / Web Docs modules: back up the DB,
-    // drop their tables, clean orphaned preferences, and reclaim space. Gated by a
-    // sentinel file so it runs exactly once. (Runs after EnsureCreated, which no
-    // longer includes these tables in the model so won't recreate them.)
-    var webRemovalSentinel = Path.Combine(dataDir, "webmodules-removed.flag");
-    if (!File.Exists(webRemovalSentinel))
-    {
-        var migrationLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Migration");
-        try
-        {
-            // Only do destructive work — and only take a backup — if the legacy tables are
-            // actually still here. On a fresh install there are none, so a full-size copy of
-            // the database would be pure waste.
-            var legacyTables = new List<string>();
-            using (var check = conn.CreateCommand())
-            {
-                check.CommandText = """
-                    SELECT name FROM sqlite_master
-                    WHERE type = 'table'
-                      AND name IN ('WebDocuments', 'WebDocCategories', 'Documents', 'Categories');
-                    """;
-                using var reader = await check.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                    legacyTables.Add(reader.GetString(0));
-            }
-
-            if (legacyTables.Count > 0)
-            {
-                migrationLogger.LogInformation("Removing legacy web module tables: {Tables}", string.Join(", ", legacyTables));
-
-                if (File.Exists(dbPath))
-                {
-                    var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                    foreach (var suffix in new[] { "", "-wal", "-shm" })
-                    {
-                        var src = dbPath + suffix;
-                        if (File.Exists(src))
-                            File.Copy(src, $"{dbPath}.bak-{stamp}{suffix}", overwrite: true);
-                    }
-                }
-
-                // The legacy category tables self-reference through ParentId, and
-                // Microsoft.Data.Sqlite enables foreign keys by default. DROP TABLE clears rows
-                // internally, so dropping a populated self-referencing table raises
-                // "FOREIGN KEY constraint failed". Suspend enforcement for the drops only.
-                using (var fkOff = conn.CreateCommand())
-                {
-                    fkOff.CommandText = "PRAGMA foreign_keys=OFF";
-                    await fkOff.ExecuteNonQueryAsync();
-                }
-                try
-                {
-                    using var drop = conn.CreateCommand();
-                    drop.CommandText = """
-                        DROP TABLE IF EXISTS WebDocuments;
-                        DROP TABLE IF EXISTS WebDocCategories;
-                        DROP TABLE IF EXISTS Documents;
-                        DROP TABLE IF EXISTS Categories;
-                        DELETE FROM UserPreferences
-                            WHERE EntityType IN ('Category','SopDocument','WebDocCategory','WebDocument');
-                        """;
-                    await drop.ExecuteNonQueryAsync();
-                }
-                finally
-                {
-                    using var fkOn = conn.CreateCommand();
-                    fkOn.CommandText = "PRAGMA foreign_keys=ON";
-                    await fkOn.ExecuteNonQueryAsync();
-                }
-            }
-
-            // The removal itself is complete, so record it now. VACUUM below only reclaims
-            // space; letting a VACUUM failure block the sentinel would re-run the drop — and
-            // another full-size backup copy — on every single startup.
-            await File.WriteAllTextAsync(webRemovalSentinel, $"Removed {DateTime.Now:O}");
-
-            try
-            {
-                using var vacuum = conn.CreateCommand();
-                vacuum.CommandText = "VACUUM";
-                vacuum.CommandTimeout = 300; // a heavily fragmented database can take a while
-                await vacuum.ExecuteNonQueryAsync();
-            }
-            catch (Exception ex)
-            {
-                migrationLogger.LogWarning(ex,
-                    "VACUUM after web module removal failed. The data is correct but the database file keeps its current size; run VACUUM manually to compact it.");
-            }
-        }
-        catch (Exception ex)
-        {
-            migrationLogger.LogError(ex, "Web module removal/cleanup failed.");
-        }
-    }
-
     try
     {
-      try
-      {
-        // Add Color and IsPinned columns if missing
-        foreach (var table in new[] { "DocumentCategories" })
-        {
-            using var pragmaCmd = conn.CreateCommand();
-            pragmaCmd.CommandText = $"PRAGMA table_info('{table}')";
-            var columns = new HashSet<string>();
-            using (var reader = await pragmaCmd.ExecuteReaderAsync())
-            {
-                while (await reader.ReadAsync())
-                    columns.Add(reader.GetString(1));
-            }
-            if (columns.Count > 0) // table exists
-            {
-                if (!columns.Contains("Color"))
-                {
-                    using var alter = conn.CreateCommand();
-                    alter.CommandText = $"ALTER TABLE {table} ADD COLUMN Color TEXT";
-                    await alter.ExecuteNonQueryAsync();
-                }
-                if (!columns.Contains("IsPinned"))
-                {
-                    using var alter = conn.CreateCommand();
-                    alter.CommandText = $"ALTER TABLE {table} ADD COLUMN IsPinned INTEGER NOT NULL DEFAULT 0";
-                    await alter.ExecuteNonQueryAsync();
-                }
-            }
-        }
-
-        // Create DocumentCategories and OfficeDocuments tables if missing
-        using var checkCmd = conn.CreateCommand();
-        checkCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='DocumentCategories'";
-        var exists = await checkCmd.ExecuteScalarAsync();
-        if (exists is null)
-        {
-            using var create = conn.CreateCommand();
-            create.CommandText = """
-                CREATE TABLE DocumentCategories (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Name TEXT NOT NULL DEFAULT '',
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    IsPinned INTEGER NOT NULL DEFAULT 0,
-                    Color TEXT,
-                    ParentId INTEGER,
-                    FOREIGN KEY (ParentId) REFERENCES DocumentCategories(Id) ON DELETE RESTRICT
-                );
-                CREATE UNIQUE INDEX IX_DocumentCategories_ParentId_Name ON DocumentCategories(ParentId, Name);
-
-                CREATE TABLE OfficeDocuments (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Title TEXT NOT NULL DEFAULT '',
-                    FileName TEXT NOT NULL DEFAULT '',
-                    StoredFileName TEXT NOT NULL DEFAULT '',
-                    ContentType TEXT NOT NULL DEFAULT '',
-                    FileSize INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    CategoryId INTEGER NOT NULL,
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    UpdatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    FOREIGN KEY (CategoryId) REFERENCES DocumentCategories(Id) ON DELETE CASCADE
-                );
-                CREATE UNIQUE INDEX IX_OfficeDocuments_CategoryId_Title ON OfficeDocuments(CategoryId, Title);
-                """;
-            await create.ExecuteNonQueryAsync();
-        }
-        // Create SopCategories and SopFiles tables if missing
-        using var checkSopCat = conn.CreateCommand();
-        checkSopCat.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='SopCategories'";
-        var sopCatExists = await checkSopCat.ExecuteScalarAsync();
-        if (sopCatExists is null)
-        {
-            using var create = conn.CreateCommand();
-            create.CommandText = """
-                CREATE TABLE SopCategories (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Name TEXT NOT NULL DEFAULT '',
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    IsPinned INTEGER NOT NULL DEFAULT 0,
-                    Color TEXT,
-                    ParentId INTEGER,
-                    FOREIGN KEY (ParentId) REFERENCES SopCategories(Id) ON DELETE RESTRICT
-                );
-                CREATE UNIQUE INDEX IX_SopCategories_ParentId_Name ON SopCategories(ParentId, Name);
-
-                CREATE TABLE SopFiles (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    Title TEXT NOT NULL DEFAULT '',
-                    FileName TEXT NOT NULL DEFAULT '',
-                    StoredFileName TEXT NOT NULL DEFAULT '',
-                    ContentType TEXT NOT NULL DEFAULT '',
-                    FileSize INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    CategoryId INTEGER NOT NULL,
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    UpdatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
-                    FOREIGN KEY (CategoryId) REFERENCES SopCategories(Id) ON DELETE CASCADE
-                );
-                CREATE UNIQUE INDEX IX_SopFiles_CategoryId_Title ON SopFiles(CategoryId, Title);
-                """;
-            await create.ExecuteNonQueryAsync();
-        }
-
-        // Create UserPreferences table if missing (per-machine favorites/pins/colors)
-        using var checkUserPrefs = conn.CreateCommand();
-        checkUserPrefs.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='UserPreferences'";
-        var userPrefsExists = await checkUserPrefs.ExecuteScalarAsync();
-        if (userPrefsExists is null)
-        {
-            using var create = conn.CreateCommand();
-            create.CommandText = """
-                CREATE TABLE UserPreferences (
-                    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    ClientId TEXT NOT NULL DEFAULT '',
-                    EntityType TEXT NOT NULL DEFAULT '',
-                    EntityId INTEGER NOT NULL DEFAULT 0,
-                    IsFavorited INTEGER NOT NULL DEFAULT 0,
-                    IsPinned INTEGER NOT NULL DEFAULT 0,
-                    Color TEXT
-                );
-                CREATE UNIQUE INDEX IX_UserPreferences_Client_Entity
-                    ON UserPreferences(ClientId, EntityType, EntityId);
-                CREATE INDEX IX_UserPreferences_Client_Type_Fav
-                    ON UserPreferences(ClientId, EntityType, IsFavorited);
-                """;
-            await create.ExecuteNonQueryAsync();
-
-            // Migrate existing favorites/pins/colors from entity tables to UserPreferences
-            var migrations = new[]
-            {
-                ("SopCategories", "SopCategory", true),
-                ("DocumentCategories", "DocumentCategory", true),
-                ("SopFiles", "SopFile", false),
-                ("OfficeDocuments", "OfficeDocument", false),
-            };
-
-            foreach (var (table, entityType, hasPinColor) in migrations)
-            {
-                using var migrate = conn.CreateCommand();
-                if (hasPinColor)
-                {
-                    migrate.CommandText = $@"
-                        INSERT INTO UserPreferences (ClientId, EntityType, EntityId, IsFavorited, IsPinned, Color)
-                        SELECT 'legacy-migrated', '{entityType}', Id, IsFavorited, IsPinned, Color
-                        FROM {table}
-                        WHERE IsFavorited = 1 OR IsPinned = 1 OR Color IS NOT NULL";
-                }
-                else
-                {
-                    migrate.CommandText = $@"
-                        INSERT INTO UserPreferences (ClientId, EntityType, EntityId, IsFavorited, IsPinned, Color)
-                        SELECT 'legacy-migrated', '{entityType}', Id, IsFavorited, 0, NULL
-                        FROM {table}
-                        WHERE IsFavorited = 1";
-                }
-                await migrate.ExecuteNonQueryAsync();
-            }
-        }
-
-    }
-      catch (Exception ex)
-      {
-          var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Migration");
-          logger.LogError(ex, "Database schema migration failed. The app will continue but some features may not work correctly until the database is updated.");
-      }
+        // Enable WAL once — it persists in the DB file header, so every later connection opens in WAL
+        // automatically (readers don't block the single writer). Per-connection busy_timeout is handled
+        // by SqlitePragmaInterceptor. Setting WAL per-connection instead would be needlessly expensive.
+        using var walCmd = conn.CreateCommand();
+        walCmd.CommandText = "PRAGMA journal_mode=WAL;";
+        await walCmd.ExecuteNonQueryAsync();
     }
     finally
     {
@@ -385,41 +135,6 @@ using (var scope = app.Services.CreateScope())
     // Ensure uploads directories exist
     DocumentService.GetUploadDirectory();
     SopFileService.GetUploadDirectory();
-
-    // Provision + seed the Azure SQL inventory database (schema comes from the EF model).
-    try
-    {
-        var invDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
-        await invDb.Database.EnsureCreatedAsync();
-
-        if (!await invDb.InventoryLocations.AnyAsync())
-        {
-            invDb.InventoryLocations.AddRange(
-                new InventoryLocation { Name = "Op 1", SortOrder = 0 },
-                new InventoryLocation { Name = "Op 2", SortOrder = 1 },
-                new InventoryLocation { Name = "Op 3", SortOrder = 2 },
-                new InventoryLocation { Name = "Sterilization", SortOrder = 3 },
-                new InventoryLocation { Name = "Storage", SortOrder = 4 },
-                new InventoryLocation { Name = "Front Office", SortOrder = 5 });
-
-            invDb.InventoryStaff.Add(new InventoryStaff { Name = "Front Desk", SortOrder = 0 });
-
-            var operatory = new InventoryCategory { Name = "Operatory Equipment", SortOrder = 0 };
-            operatory.Children.Add(new InventoryCategory { Name = "Handpieces", SortOrder = 0 });
-            invDb.InventoryCategories.AddRange(
-                operatory,
-                new InventoryCategory { Name = "Sterilization", SortOrder = 1 },
-                new InventoryCategory { Name = "Consumables / Chairside", SortOrder = 2 },
-                new InventoryCategory { Name = "Office / Admin", SortOrder = 3 });
-
-            await invDb.SaveChangesAsync();
-        }
-    }
-    catch (Exception ex)
-    {
-        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DecoSOP.Inventory");
-        logger.LogError(ex, "Inventory (Azure SQL) provisioning/seed failed. The inventory section may not work until the database is reachable.");
-    }
 }
 
 app.UseResponseCompression();
@@ -442,103 +157,46 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Helper: resolve stored filename to actual file on disk.
-// Tries the exact StoredFileName first; if not found, strips the "{id}_" prefix
-// (handles cases where files were imported without the prefix).
-string? ResolveFilePath(string uploadDir, string? storedFileName)
+// Download / inline-preview / PDF-preview endpoints, mapped once per file module.
+void MapFileApi<TFile>(string module, Func<string> uploadDir) where TFile : class, IFileNode
 {
-    if (string.IsNullOrEmpty(storedFileName)) return null;
-    var path = Path.Combine(uploadDir, storedFileName);
-    if (File.Exists(path)) return path;
-
-    // Strip "{id}_" prefix and try again
-    var underscoreIdx = storedFileName.IndexOf('_');
-    if (underscoreIdx > 0)
+    string? Resolve(TFile doc)
     {
-        var unprefixed = storedFileName[(underscoreIdx + 1)..];
-        var fallbackPath = Path.Combine(uploadDir, unprefixed);
-        if (File.Exists(fallbackPath)) return fallbackPath;
+        var path = Path.Combine(uploadDir(), doc.StoredFileName);
+        return File.Exists(path) ? path : null;
     }
-    return null;
+
+    app.MapGet($"/api/{module}/{{id:int}}/download", async (int id, AppDbContext db) =>
+    {
+        var doc = await db.Set<TFile>().FindAsync(id);
+        var path = doc is null ? null : Resolve(doc);
+        return path is null ? Results.NotFound() : Results.File(path, doc!.ContentType, doc.FileName);
+    });
+
+    // Inline preview (no Content-Disposition: attachment)
+    app.MapGet($"/api/{module}/{{id:int}}/preview", async (int id, AppDbContext db) =>
+    {
+        var doc = await db.Set<TFile>().FindAsync(id);
+        var path = doc is null ? null : Resolve(doc);
+        return path is null ? Results.NotFound() : Results.File(path, doc!.ContentType, enableRangeProcessing: true);
+    });
+
+    // PDF preview — converts via LibreOffice on first access, then caches
+    app.MapGet($"/api/{module}/{{id:int}}/preview-pdf", async (int id, AppDbContext db) =>
+    {
+        var doc = await db.Set<TFile>().FindAsync(id);
+        var path = doc is null ? null : Resolve(doc);
+        if (path is null) return Results.NotFound();
+
+        var pdfPath = await PdfConversionService.GetOrCreatePdfAsync(path, doc!.StoredFileName);
+        return pdfPath is null
+            ? Results.Problem($"PDF conversion failed: {PdfConversionService.LastError ?? "Unknown error"}")
+            : Results.File(pdfPath, "application/pdf", enableRangeProcessing: true);
+    });
 }
 
-// File download endpoint for office documents
-app.MapGet("/api/documents/{id:int}/download", async (int id, AppDbContext db) =>
-{
-    var doc = await db.OfficeDocuments.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(DocumentService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    return Results.File(filePath, doc.ContentType, doc.FileName);
-});
-
-// File preview endpoint — serves inline (no Content-Disposition: attachment)
-app.MapGet("/api/documents/{id:int}/preview", async (int id, AppDbContext db) =>
-{
-    var doc = await db.OfficeDocuments.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(DocumentService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    return Results.File(filePath, doc.ContentType, enableRangeProcessing: true);
-});
-
-// PDF preview for Office documents — converts via LibreOffice on first access, then caches
-app.MapGet("/api/documents/{id:int}/preview-pdf", async (int id, AppDbContext db) =>
-{
-    var doc = await db.OfficeDocuments.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(DocumentService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    var pdfPath = await PdfConversionService.GetOrCreatePdfAsync(filePath, doc.StoredFileName);
-    if (pdfPath is null)
-        return Results.Problem($"PDF conversion failed: {PdfConversionService.LastError ?? "Unknown error"}");
-
-    return Results.File(pdfPath, "application/pdf", enableRangeProcessing: true);
-});
-
-// File download endpoint for SOP files
-app.MapGet("/api/sops/{id:int}/download", async (int id, AppDbContext db) =>
-{
-    var doc = await db.SopFiles.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(SopFileService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    return Results.File(filePath, doc.ContentType, doc.FileName);
-});
-
-app.MapGet("/api/sops/{id:int}/preview", async (int id, AppDbContext db) =>
-{
-    var doc = await db.SopFiles.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(SopFileService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    return Results.File(filePath, doc.ContentType, enableRangeProcessing: true);
-});
-
-app.MapGet("/api/sops/{id:int}/preview-pdf", async (int id, AppDbContext db) =>
-{
-    var doc = await db.SopFiles.FindAsync(id);
-    if (doc is null) return Results.NotFound();
-
-    var filePath = ResolveFilePath(SopFileService.GetUploadDirectory(), doc.StoredFileName);
-    if (filePath is null) return Results.NotFound();
-
-    var pdfPath = await PdfConversionService.GetOrCreatePdfAsync(filePath, doc.StoredFileName);
-    if (pdfPath is null)
-        return Results.Problem($"PDF conversion failed: {PdfConversionService.LastError ?? "Unknown error"}");
-
-    return Results.File(pdfPath, "application/pdf", enableRangeProcessing: true);
-});
+MapFileApi<OfficeDocument>("documents", DocumentService.GetUploadDirectory);
+MapFileApi<SopFile>("sops", SopFileService.GetUploadDirectory);
 
 // Database export endpoint
 app.MapGet("/api/settings/export-db", () =>
@@ -548,3 +206,7 @@ app.MapGet("/api/settings/export-db", () =>
 });
 
 app.Run();
+
+// Reached on graceful shutdown. Explicit because the extract-report branch above returns an
+// exit code, which makes the entry point int-returning.
+return 0;

@@ -68,36 +68,6 @@ public class UserPreferenceService
         await _db.SaveChangesAsync();
     }
 
-    /// <summary>
-    /// On first request for a new client, clone preferences from the legacy migration
-    /// so existing customizations aren't lost on upgrade.
-    /// </summary>
-    public async Task ClaimLegacyPreferencesIfNeeded()
-    {
-        var hasAny = await _db.UserPreferences.AnyAsync(p => p.ClientId == ClientId);
-        if (hasAny) return;
-
-        var legacyPrefs = await _db.UserPreferences
-            .Where(p => p.ClientId == "legacy-migrated")
-            .ToListAsync();
-
-        if (legacyPrefs.Count == 0) return;
-
-        foreach (var lp in legacyPrefs)
-        {
-            _db.UserPreferences.Add(new UserPreference
-            {
-                ClientId = ClientId,
-                EntityType = lp.EntityType,
-                EntityId = lp.EntityId,
-                IsFavorited = lp.IsFavorited,
-                IsPinned = lp.IsPinned,
-                Color = lp.Color
-            });
-        }
-        await _db.SaveChangesAsync();
-    }
-
     private async Task<UserPreference> GetOrCreateAsync(string entityType, int entityId)
     {
         var pref = await _db.UserPreferences

@@ -24,7 +24,6 @@
 }
 
 .btn-favorites-header {
-    margin-left: auto;
     color: #f5a623;
     font-size: 1.5rem;
     text-decoration: none;
@@ -249,4 +248,18 @@
     .navbar-toggler {
         display: none;
     }
+}
+
+.btn-search-header {
+    margin-left: auto;
+    margin-right: 0.6rem;
+    font-size: 1.05rem;
+    text-decoration: none;
+    opacity: 0.65;
+    transition: opacity 0.15s;
+    line-height: 1;
+}
+
+.btn-search-header:hover {
+    opacity: 1;
 }

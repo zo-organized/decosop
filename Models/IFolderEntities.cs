@@ -23,3 +23,19 @@ public interface IFileNode
     DateTime CreatedAt { get; set; }
     DateTime UpdatedAt { get; set; }
 }
+
+/// <summary>Category row including its typed navigations, so FolderFileService can serve both modules.</summary>
+public interface ICategoryNode<TCat, TFile> : ICategoryNode
+    where TCat : ICategoryNode<TCat, TFile>
+    where TFile : IFileNode
+{
+    TCat? Parent { get; set; }
+    List<TCat> Children { get; set; }
+    List<TFile> Documents { get; set; }
+}
+
+/// <summary>File row including its typed category navigation.</summary>
+public interface IFileNode<TCat> : IFileNode
+{
+    TCat Category { get; set; }
+}

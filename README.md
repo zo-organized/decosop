@@ -17,12 +17,67 @@ Built with Blazor Server (.NET 10) and SQLite. Runs as a Windows Service on a si
 ## Features
 
 - 1:1 mirror of your folder tree — nested categories, every file type
-- Full-text search across titles and file names
+- **Content search** — searches inside your documents, not just their names, so you can look up a subject and find every SOP that discusses it (see below)
 - Inline **PDF/image preview** and one-click **print** (Office files are rendered to PDF on demand via LibreOffice, if installed)
 - **Open in Word/Excel/PowerPoint** via the Office URI scheme (when configured for a SharePoint/share path)
 - **Favorites, pins, and folder colors** — stored per machine, so each workstation has its own quick-access set
 - Create folders, upload files, rename folders, and replace a file — all written back into the watched folder
 - Runs as a Windows Service — starts on boot, always available on the LAN
+
+## Content search
+
+The search box searches **inside** your documents. Typing a subject returns every SOP and
+document that discusses it, ranked by relevance, with the matching passage shown so you can see
+why each result appeared.
+
+- Searches SOPs and Documents together in one ranked list, with filters for module and file type
+- Reads Word, Excel, PDF, text and PowerPoint files, including the legacy `.doc` and `.xls`
+  formats that make up a large share of most established libraries
+- Word forms are handled automatically — searching `sterilize` finds documents about
+  `sterilization`, and `refund` finds `refunds`
+- Put `"double quotes"` around words to match them as an exact phrase
+- Results appear as you type; press Enter or click **See all results** for the full page
+
+### How the index is built
+
+On first run DecoSOP reads every document in the background and builds a full-text index. This
+takes roughly 15–25 minutes for a few thousand files and runs at low priority, so the app stays
+usable throughout — search works immediately and simply gets more complete as it finishes.
+After that only changed files are re-read, which is near-instant.
+
+The index lives in `decosop-search.db`, separate from the main database. It is entirely derived
+data, so it is **not** included in the database export, and deleting it is a complete repair:
+the app rebuilds it from scratch on the next start.
+
+**LibreOffice matters here.** Legacy `.doc` files cannot be read without it. If LibreOffice is
+not installed, those files are still findable by title and folder, but their contents are not
+searchable. The installer offers to install it; **Settings → Search Index** shows how many files
+were skipped for this reason.
+
+### Settings → Search Index
+
+Shows how much of the library is searchable, how much text has been indexed, how many files hold
+no readable text, and any that failed with the reason. **Rebuild index** discards the index and
+reads everything again — useful after installing LibreOffice, or if results ever look wrong.
+
+### Files with no readable text
+
+Scanned documents — a photograph or scan of a page rather than a real document — contain no text
+to read. These are indexed by **title and folder only**, and are listed in Settings under
+"No readable text". Optical character recognition, which would make their contents searchable
+too, is not currently part of DecoSOP.
+
+### Diagnosing a file that will not appear
+
+From an Administrator command prompt in the install folder:
+
+```
+DecoSOP.exe extract-report "C:\path\to\your\folder"
+```
+
+This reads every file and reports, per file type, how many were read successfully, how many held
+no text, and what failed with the reason. Add a number to sample rather than read everything
+(`extract-report "C:\path" 25`).
 
 ## Installation
 
@@ -145,12 +200,15 @@ dotnet run
 ```
 Components/
   Layout/   - MainLayout, NavMenu (sidebar with SOPs/Documents toggle)
-  Pages/    - SopHome/DocHome, category views, viewers, upload, Settings
+  Pages/    - SopHome/DocHome, category views, viewers, Search, upload, Settings
   Shared/   - CategoryContextMenu, FolderIcon, cards, banners
 Data/       - EF Core DbContext (category + file index, user preferences)
+              SearchDb (the separate, rebuildable full-text index)
 Models/     - SopCategory/SopFile, DocumentCategory/OfficeDocument, UserPreference
 Services/   - FolderReconciler + FolderSyncBackgroundService (the sync engine)
               SopFileService/DocumentService (folder-backed CRUD)
+              Extraction/ - per-format text extractors + the extract-report tool
+              Search/     - index writer, query parser, background index builder
               PdfConversionService, OfficeProtocol, UpdateService, caches
 wwwroot/js/ - PDF preview, print, sidebar resize, context menu
 installer/  - Inno Setup script + Configure-DecoSOP-Sync tool

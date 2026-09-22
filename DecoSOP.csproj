@@ -7,24 +7,43 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <Version>2.0.2</Version>
+    <Version>2.2.0</Version>
+    <!-- The installer packages from .\publish, so publish output lands inside the project
+         folder. Without this, the next "dotnet build" globs publish\wwwroot as project content
+         and fails with BLAZOR106 on the scoped JS it finds there. The test project lives under
+         .	ests for the same reason: this is a Web SDK project at the repo root, so its default
+         globs would otherwise compile the tests into the app. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**;tests\**</DefaultItemExcludes>
     <Authors>Tyler Sweeney</Authors>
     <Company>Deco Dental</Company>
     <Copyright>Copyright (c) 2025 Tyler Sweeney</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.3">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.3" />
-    <!-- Inventory module lives in Azure SQL (separate DbContext); SOPs/Docs stay in local SQLite. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.3" />
     <!-- Override EF Core's transitive SQLitePCLRaw 2.1.11 (bundles SQLite 3.49.1, vulnerable to
          CVE-2025-6965). 3.0.3 bundles SQLite 3.50.4+, which contains the fix. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+
+    <!-- Content search: text extraction from the document corpus.
+         PdfPig reads the PDF text layer; NPOI reads OpenXML Word and both spreadsheet formats.
+         Legacy .doc/.ppt/.rtf go through LibreOffice (see LibreOfficeTextExtractor) because NPOI
+         no longer ships the legacy Word reader. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <!-- NPOI drags in System.Security.Cryptography.Xml 8.0.2, which carries several known
+         high-severity advisories. Do NOT add an explicit PackageReference to "fix" it: that
+         type ships in the .NET 10 shared framework, so NuGet prunes the transitive package
+         away entirely and the framework's own patched implementation is used. Pinning the
+         package instead disables pruning and puts the vulnerable assembly back in the output.
+         Verify with "dotnet list package" using the vulnerable + include-transitive flags. -->
+    <PackageReference Include="NPOI" Version="2.7.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project exercises internal helpers (query broadening, rowid derivation)
+         directly rather than only through their public callers. -->
+    <InternalsVisibleTo Include="DecoSOP.Tests" />
   </ItemGroup>
 
 </Project>

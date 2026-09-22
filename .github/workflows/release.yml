@@ -33,14 +33,14 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Test
+        run: dotnet test tests/DecoSOP.Tests/DecoSOP.Tests.csproj -c Release --nologo
+
       - name: Publish
         run: dotnet publish -c Release -r win-x64 --self-contained -o ./publish -p:Version=${{ steps.version.outputs.VERSION }}
 
-      - name: Bundle install scripts
-        run: |
-          Copy-Item install.ps1 -Destination ./publish/
-          Copy-Item uninstall.ps1 -Destination ./publish/
-          Copy-Item installer\Configure-DecoSOP-Sync.ps1 -Destination ./publish/
+      - name: Bundle sync-setup script
+        run: Copy-Item installer\Configure-DecoSOP-Sync.ps1 -Destination ./publish/
         shell: powershell
 
       - name: Create zip (portable)

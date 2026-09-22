@@ -1499,3 +1499,213 @@ h1:focus {
         color: inherit !important;
     }
 }
+
+/* ============================================
+   Content search
+   ============================================ */
+
+.search-page h1 {
+    font-size: 1.3rem;
+    margin-bottom: 0.35rem;
+}
+
+.search-page .lead {
+    font-size: 0.88rem;
+    margin-bottom: 1rem;
+}
+
+.search-page .search-box {
+    margin: 0 0 1rem;
+}
+
+.search-input {
+    font-size: 0.88rem;
+    padding: 0.4rem 0.7rem;
+    max-width: 640px;
+}
+
+.search-building {
+    max-width: 640px;
+}
+
+.search-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0 0 1.25rem;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.filter-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    min-width: 3.5rem;
+}
+
+.filter-chip {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 999px;
+    padding: 0.12rem 0.55rem;
+    font-size: 0.73rem;
+    color: #343a40;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.filter-chip:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+}
+
+.filter-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.filter-count {
+    opacity: 0.65;
+    margin-left: 0.3rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.search-hit {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid #eceef1;
+}
+
+.search-hit:last-child {
+    border-bottom: none;
+}
+
+.search-hit-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.search-hit-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent-link);
+    text-decoration: none;
+}
+
+.search-hit-title:hover {
+    text-decoration: underline;
+}
+
+.search-hit-ext,
+.search-hit-module {
+    font-size: 0.57rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    background: #eef1f4;
+    color: #5a6673;
+    border: 1px solid #e0e4e8;
+}
+
+.search-hit-path {
+    font-size: 0.66rem;
+    color: #6c757d;
+    margin-top: 0.15rem;
+}
+
+.search-hit-snippet {
+    font-size: 0.75rem;
+    color: #43494f;
+    margin-top: 0.3rem;
+    line-height: 1.5;
+}
+
+.search-hit-snippet mark {
+    background: #fff2b8;
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.search-paging {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+/* Sidebar quick-search results gain a snippet line */
+.nav-search-snippet {
+    display: block;
+    font-size: 0.72rem;
+    color: #8a94a0;
+    line-height: 1.35;
+    margin-top: 0.1rem;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.nav-search-snippet mark {
+    background: transparent;
+    color: #ffd479;
+    padding: 0;
+    font-weight: 600;
+}
+
+.nav-search-all {
+    display: block;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* File-type icons. Colours mirror .file-type-badge so the glyph and the text tag agree. */
+.file-type-icon {
+    display: inline-flex;
+    align-self: center;
+    flex: 0 0 auto;
+    width: 1.15em;
+    height: 1.15em;
+}
+
+.file-type-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.fti-pdf     { color: #dc3545; }
+.fti-word    { color: #2b579a; }
+.fti-sheet   { color: #217346; }
+.fti-slides  { color: #d24726; }
+.fti-image   { color: #6f42c1; }
+.fti-archive { color: #fd7e14; }
+.fti-text    { color: #6c757d; }
+.fti-other   { color: #8a94a0; }
+
+.search-hit-head {
+    gap: 0.35rem;
+}
+
+/* The icon sizes from its container, not the title, so it needs pinning to the
+   title's scale — otherwise it grew visually dominant as the type came down. */
+.search-hit-head .file-type-icon {
+    width: 0.95rem;
+    height: 0.95rem;
+}

@@ -1,6 +1,8 @@
+@page "/sops/{Id:int}"
 @page "/documents/{Id:int}"
 @using DecoSOP.Services
 @using DecoSOP.Models
+@inject SopFileService SopFileService
 @inject DocumentService DocService
 @inject UserPreferenceService Prefs
 @inject DataCacheService Cache
@@ -8,7 +10,11 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-<PageTitle>@(document?.Title ?? "Document") - DecoSOP</PageTitle>
+@if (IsSop)
+{
+    <div data-mode="sop"></div>
+}
+<PageTitle>@(document?.Title ?? Noun) - DecoSOP</PageTitle>
 
 @if (document is null)
 {
@@ -25,7 +31,7 @@ else
             <button class="btn-star btn-star-lg @(isFavorited ? "starred" : "")"
                     title="@(isFavorited ? "Remove from favorites" : "Add to favorites")"
                     @onclick="ToggleFavorite">
-                @(isFavorited ? "\u2605" : "\u2606")
+                @(isFavorited ? "★" : "☆")
             </button>
             <div class="sop-actions">
                 @if (openUri is not null)
@@ -37,7 +43,7 @@ else
                     <button class="btn btn-sm btn-outline-secondary" @onclick="PrintDocument">Print</button>
                 }
                 <button class="btn btn-sm btn-outline-primary" @onclick="ToggleReplacePanel">Replace file</button>
-                <a class="btn btn-sm btn-primary" href="/api/documents/@document.Id/download" target="_blank">Download</a>
+                <a class="btn btn-sm btn-primary" href="/api/@Prefix/@document.Id/download" target="_blank">Download</a>
             </div>
         </div>
 
@@ -45,7 +51,7 @@ else
         {
             <div class="alert alert-info mt-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span>Replace with an updated <strong>@DocumentService.GetFileExtension(document.FileName)</strong> file:</span>
+                    <span>Replace with an updated <strong>@SopFileService.GetFileExtension(document.FileName)</strong> file:</span>
                     <InputFile OnChange="OnReplaceFileSelected" accept="@fileExt" class="form-control form-control-sm" style="max-width:320px;" disabled="@isReplacing" />
                     <button class="btn btn-sm btn-primary" @onclick="DoReplace" disabled="@(isReplacing || replaceFile is null)">
                         @(isReplacing ? "Replacing..." : "Replace")
@@ -63,13 +69,13 @@ else
         @if (isImage)
         {
             <div class="doc-preview">
-                <img src="/api/documents/@document.Id/preview" alt="@document.Title" class="doc-preview-image" />
+                <img src="/api/@Prefix/@document.Id/preview" alt="@document.Title" class="doc-preview-image" />
             </div>
         }
         else if (isPdf)
         {
             <div class="doc-preview">
-                <iframe src="/api/documents/@document.Id/preview" class="doc-preview-frame"></iframe>
+                <iframe src="@($"/api/{Prefix}/{document.Id}/preview{PdfViewerFragment}")" class="doc-preview-frame"></iframe>
             </div>
         }
         else if (isConvertible)
@@ -96,14 +102,14 @@ else
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Type</span>
                     <span>
-                        <span class="file-type-badge badge-@DocumentService.GetFileExtension(document.FileName).ToLower()">
-                            @DocumentService.GetFileExtension(document.FileName)
+                        <span class="file-type-badge badge-@SopFileService.GetFileExtension(document.FileName).ToLower()">
+                            @SopFileService.GetFileExtension(document.FileName)
                         </span>
                     </span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Size</span>
-                    <span>@DocumentService.FormatFileSize(document.FileSize)</span>
+                    <span>@SopFileService.FormatFileSize(document.FileSize)</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Category</span>
@@ -115,7 +121,7 @@ else
                 </div>
             </div>
             <div class="download-section">
-                <a class="download-btn" href="/api/documents/@document.Id/download" target="_blank">
+                <a class="download-btn" href="/api/@Prefix/@document.Id/download" target="_blank">
                     Download @document.FileName
                 </a>
             </div>
@@ -124,9 +130,26 @@ else
 }
 
 @code {
+    /// <summary>
+    /// Carried over from a search result so the reader lands on what they were looking for.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? SearchTerm { get; set; }
+
+    /// <summary>
+    /// Chrome and Edge honour #search= in their built-in PDF viewer and open with the term
+    /// already found. Other viewers ignore the fragment harmlessly. Scanned PDFs have no text
+    /// layer to find, so nothing highlights there however good the viewer is.
+    /// </summary>
+    private string PdfViewerFragment =>
+        string.IsNullOrWhiteSpace(SearchTerm) ? "" : $"#search={Uri.EscapeDataString(SearchTerm)}";
+
     [Parameter] public int Id { get; set; }
 
-    private OfficeDocument? document;
+    private bool IsSop => !Nav.Uri.Contains("/documents/", StringComparison.OrdinalIgnoreCase);
+    private string Noun => IsSop ? "SOP" : "Document";
+    private string Prefix => IsSop ? "sops" : "documents";
+
+    private IFileNode? document;
     private string categoryPath = string.Empty;
     private bool isFavorited;
     private bool converting;
@@ -145,21 +168,29 @@ else
     private string? openUri;
     private string? openApp;
 
+    private async Task<IFileNode?> LoadDocumentAsync()
+        => IsSop
+            ? await Cache.RunExclusiveAsync(() => SopFileService.GetDocumentAsync(Id))
+            : await Cache.RunExclusiveAsync(() => DocService.GetDocumentAsync(Id));
+
     protected override async Task OnParametersSetAsync()
     {
-        document = await Cache.RunExclusiveAsync(() => DocService.GetDocumentAsync(Id));
+        document = await LoadDocumentAsync();
         pdfLoaded = false;
         converting = false;
         openUri = null;
         openApp = null;
         if (document is not null)
         {
-            categoryPath = await Cache.RunExclusiveAsync(() => DocService.GetCategoryPathAsync(document.CategoryId));
-            var prefs = await Cache.GetDocDocPrefsAsync();
+            categoryPath = IsSop
+                ? await Cache.RunExclusiveAsync(() => SopFileService.GetCategoryPathAsync(document.CategoryId))
+                : await Cache.RunExclusiveAsync(() => DocService.GetCategoryPathAsync(document.CategoryId));
+            var prefs = await (IsSop ? Cache.GetSopFilePrefsAsync() : Cache.GetDocDocPrefsAsync());
             isFavorited = prefs.TryGetValue(Id, out var p) && p.IsFavorited;
             openApp = OfficeProtocol.For(document.FileName)?.App;
             openUri = OfficeProtocol.OpenForEditUri(document.FileName, document.StoredFileName,
-                DocumentService.OpenBase, DocService.GetFilePath(document));
+                IsSop ? SopFileService.OpenBase : DocumentService.OpenBase,
+                IsSop ? SopFileService.GetFilePath((SopFile)document) : DocService.GetFilePath((OfficeDocument)document));
         }
     }
 
@@ -171,9 +202,8 @@ else
             converting = true;
             StateHasChanged();
 
-            // Set the iframe src to the PDF preview endpoint
-            // The server will convert on first access and cache for subsequent views
-            var pdfUrl = $"/api/documents/{document.Id}/preview-pdf";
+            // The server converts on first access and caches for subsequent views
+            var pdfUrl = $"/api/{Prefix}/{document.Id}/preview-pdf";
             await JS.InvokeVoidAsync("documentInterop.loadPdfPreview", "pdf-preview-frame", pdfUrl);
 
             converting = false;
@@ -184,16 +214,17 @@ else
     private void GoBack()
     {
         if (document is not null)
-            Nav.NavigateTo($"/documents/category/{document.CategoryId}");
+            Nav.NavigateTo($"/{Prefix}/category/{document.CategoryId}");
         else
-            Nav.NavigateTo("/documents");
+            Nav.NavigateTo($"/{Prefix}");
     }
 
     private async Task ToggleFavorite()
     {
         if (document is null) return;
-        isFavorited = await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(OfficeDocument), document.Id));
-        Cache.InvalidateDocFavorites();
+        var entity = IsSop ? nameof(SopFile) : nameof(OfficeDocument);
+        isFavorited = await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(entity, document.Id));
+        if (IsSop) Cache.InvalidateSopFavorites(); else Cache.InvalidateDocFavorites();
     }
 
     private async Task PrintDocument()
@@ -203,16 +234,11 @@ else
         if (isConvertible)
         {
             // Open the converted PDF in a new tab and print it directly
-            await JS.InvokeVoidAsync("documentInterop.printPdf", $"/api/documents/{document.Id}/preview-pdf");
+            await JS.InvokeVoidAsync("documentInterop.printPdf", $"/api/{Prefix}/{document.Id}/preview-pdf");
         }
-        else if (isPdf)
+        else if (isPdf || isImage)
         {
-            var previewUrl = $"/api/documents/{document.Id}/preview";
-            await JS.InvokeVoidAsync("documentInterop.printFile", previewUrl, document.ContentType, document.Title);
-        }
-        else if (isImage)
-        {
-            var previewUrl = $"/api/documents/{document.Id}/preview";
+            var previewUrl = $"/api/{Prefix}/{document.Id}/preview";
             await JS.InvokeVoidAsync("documentInterop.printFile", previewUrl, document.ContentType, document.Title);
         }
     }
@@ -237,10 +263,18 @@ else
         replaceError = string.Empty;
         try
         {
-            await Cache.RunExclusiveAsync(() => DocService.ReplaceFileAsync(document.Id, replaceFile));
-            Cache.InvalidateDoc();
+            if (IsSop)
+            {
+                await Cache.RunExclusiveAsync(() => SopFileService.ReplaceFileAsync(document.Id, replaceFile));
+                Cache.InvalidateSop();
+            }
+            else
+            {
+                await Cache.RunExclusiveAsync(() => DocService.ReplaceFileAsync(document.Id, replaceFile));
+                Cache.InvalidateDoc();
+            }
             await MenuState.NotifyCategoryModified();
-            document = await Cache.RunExclusiveAsync(() => DocService.GetDocumentAsync(Id));
+            document = await LoadDocumentAsync();
             showReplacePanel = false;
             replaceFile = null;
             pdfLoaded = false; // re-trigger preview regeneration from the updated file
@@ -254,5 +288,4 @@ else
             isReplacing = false;
         }
     }
-
 }

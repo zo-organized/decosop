@@ -1,17 +1,22 @@
 @page "/sops/upload"
+@page "/documents/upload"
 @using DecoSOP.Services
 @using DecoSOP.Models
 @using Microsoft.AspNetCore.Components.Forms
 @inject SopFileService SopFileService
+@inject DocumentService DocService
 @inject DataCacheService Cache
 @inject NavigationManager Nav
 
-<div data-mode="sop"></div>
-<PageTitle>Upload SOP - DecoSOP</PageTitle>
+@if (IsSop)
+{
+    <div data-mode="sop"></div>
+}
+<PageTitle>Upload @Noun - DecoSOP</PageTitle>
 
 <div class="sop-editor">
     <div class="sop-toolbar">
-        <h1 class="m-0" style="font-size:1.4rem;">Upload SOP</h1>
+        <h1 class="m-0" style="font-size:1.4rem;">Upload @Noun</h1>
         <div class="sop-actions">
             <button class="btn btn-sm btn-success" @onclick="Upload" disabled="@(isUploading || selectedFile is null)">
                 @(isUploading ? "Uploading..." : "Upload")
@@ -28,7 +33,7 @@
     <div class="mt-3">
         <div class="mb-3">
             <label class="form-label">Title</label>
-            <input type="text" class="form-control" style="max-width:500px;" placeholder="SOP title"
+            <input type="text" class="form-control" style="max-width:500px;" placeholder="@Noun title"
                    @bind="title" />
         </div>
 
@@ -68,6 +73,10 @@
 @code {
     [SupplyParameterFromQuery] public int? CategoryId { get; set; }
 
+    private bool IsSop => !Nav.Uri.Contains("/documents/", StringComparison.OrdinalIgnoreCase);
+    private string Noun => IsSop ? "SOP" : "Document";
+    private string Prefix => IsSop ? "sops" : "documents";
+
     private string title = string.Empty;
     private string error = string.Empty;
     private bool isUploading;
@@ -77,7 +86,10 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var allCats = await Cache.RunExclusiveAsync(() => SopFileService.GetAllCategoriesAsync());
+        IEnumerable<ICategoryNode> allCats = IsSop
+            ? await Cache.RunExclusiveAsync(() => SopFileService.GetAllCategoriesAsync())
+            : await Cache.RunExclusiveAsync(() => DocService.GetAllCategoriesAsync());
+
         var lookup = allCats.ToDictionary(c => c.Id);
         categoryOptions = allCats.Select(c =>
         {
@@ -99,6 +111,7 @@
         selectedFile = e.File;
         error = string.Empty;
 
+        // Auto-fill title from filename if empty
         if (string.IsNullOrWhiteSpace(title))
         {
             title = Path.GetFileNameWithoutExtension(selectedFile.Name);
@@ -131,9 +144,10 @@
 
         try
         {
-            var doc = await Cache.RunExclusiveAsync(
-                () => SopFileService.UploadDocumentAsync(selectedCategoryId, title, selectedFile));
-            Nav.NavigateTo($"/sops/{doc.Id}");
+            var id = IsSop
+                ? (await Cache.RunExclusiveAsync(() => SopFileService.UploadDocumentAsync(selectedCategoryId, title, selectedFile))).Id
+                : (await Cache.RunExclusiveAsync(() => DocService.UploadDocumentAsync(selectedCategoryId, title, selectedFile))).Id;
+            Nav.NavigateTo($"/{Prefix}/{id}");
         }
         catch (Exception ex)
         {
@@ -145,5 +159,5 @@
         }
     }
 
-    private void Cancel() => Nav.NavigateTo("/sops");
+    private void Cancel() => Nav.NavigateTo($"/{Prefix}");
 }
