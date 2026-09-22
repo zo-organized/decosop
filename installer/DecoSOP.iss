@@ -20,7 +20,10 @@
 ; The category/file index is rebuilt from those folders automatically on startup.
 
 #define MyAppName "DecoSOP"
-#define MyAppVersion "2.1.0"
+; Release builds pass /DMyAppVersion from the git tag; this is the local-build fallback.
+#ifndef MyAppVersion
+  #define MyAppVersion "2.2.0"
+#endif
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/zo-organized/decosop"
 #define MyAppExeName "DecoSOP.exe"
