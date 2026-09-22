@@ -1,4 +1,4 @@
-; DecoSOP Inno Setup Installer Script
+﻿; DecoSOP Inno Setup Installer Script
 ; Requires Inno Setup 6.x (https://jrsoftware.org/isinfo.php)
 ;
 ; Wizard pages:
@@ -8,8 +8,8 @@
 ;   4. Port Configuration
 ;   5. Database Setup (Empty index / Import backup)
 ;   6. Import Database file        (only if Import selected)
-;   7. Import SOP uploads dir       (only if Import selected, optional — legacy uploads)
-;   8. Import Documents uploads dir (only if Import selected, optional — legacy uploads)
+;   7. Import SOP uploads dir       (only if Import selected, optional â€” legacy uploads)
+;   8. Import Documents uploads dir (only if Import selected, optional â€” legacy uploads)
 ;   9. Auto-Update Preference (checks, auto-install, time picker)
 ;  10. LibreOffice (optional download + install: Office doc previews + search indexing)
 ;  11. Shortcuts (desktop icon)
@@ -22,7 +22,7 @@
 #define MyAppName "DecoSOP"
 ; Release builds pass /DMyAppVersion from the git tag; this is the local-build fallback.
 #ifndef MyAppVersion
-  #define MyAppVersion "2.2.0"
+  #define MyAppVersion "2.2.1"
 #endif
 #define MyAppPublisher "Tyler Sweeney"
 #define MyAppURL "https://github.com/zo-organized/decosop"
@@ -57,7 +57,7 @@ CloseApplications=force
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; Published app files — excludes DB and upload dirs (user data)
+; Published app files â€” excludes DB and upload dirs (user data)
 Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,decosop-search.db,doc-uploads,sop-uploads"
 ; Document-sync setup script (SharePoint/OneDrive via rclone, or a local folder/share)
 Source: "Configure-DecoSOP-Sync.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -134,7 +134,7 @@ Type: files; Name: "{app}\update-config.json"
 ; the 2026-08-27 v2.1.0 upgrade). They are small and harmless to leave on a real uninstall.
 Type: files; Name: "{app}\rclone.conf.old*"
 Type: files; Name: "{app}\appsettings.Production.json"
-; The full-text search index is derived data — it rebuilds itself from the documents — so
+; The full-text search index is derived data â€” it rebuilds itself from the documents â€” so
 ; unlike the database it is not worth preserving across an uninstall.
 Type: files; Name: "{app}\decosop-search.db"
 Type: files; Name: "{app}\decosop-search.db-wal"
@@ -538,11 +538,11 @@ begin
     'are rebuilt from that folder automatically; this database also holds each' + #13#10 +
     'machine''s favorites, pins, and colors. Choose how to start:',
     True, False);
-  DatabasePage.Add('Empty (recommended) — content is indexed from your synced folder');
-  DatabasePage.Add('Import a database backup (.db) — restores favorites, pins, and colors');
+  DatabasePage.Add('Empty (recommended) â€” content is indexed from your synced folder');
+  DatabasePage.Add('Import a database backup (.db) â€” restores favorites, pins, and colors');
   DatabasePage.SelectedValueIndex := 0;
 
-  // Page 3: Import file picker (after database — only shown if Import selected)
+  // Page 3: Import file picker (after database â€” only shown if Import selected)
   ImportDbPage := CreateInputFilePage(
     DatabasePage.ID,
     'Import Database',
@@ -551,7 +551,7 @@ begin
     'You can export a backup from Settings in DecoSOP at any time.');
   ImportDbPage.Add('Database file:', '*.db|*.db', '.db');
 
-  // Page 4: SOP files directory (after db import — only shown if Import selected)
+  // Page 4: SOP files directory (after db import â€” only shown if Import selected)
   ImportSopDirPage := CreateCustomPage(
     ImportDbPage.ID,
     'Import SOP Files',
@@ -595,7 +595,7 @@ begin
     OnClick := @BrowseImportSopDir;
   end;
 
-  // Page 5: Documents directory (after SOP dir — only shown if Import selected)
+  // Page 5: Documents directory (after SOP dir â€” only shown if Import selected)
   ImportDocDirPage := CreateCustomPage(
     ImportSopDirPage.ID,
     'Import Document Files',
@@ -650,7 +650,7 @@ begin
     Parent := UpdatePage.Surface;
     Caption := 'When enabled, DecoSOP will periodically check GitHub for new releases' + #13#10 +
                'and show a notification in the app when an update is available.' + #13#10 + #13#10 +
-               'No data is sent — it only checks the public release page.' + #13#10 +
+               'No data is sent â€” it only checks the public release page.' + #13#10 +
                'You can change these settings later in the app.';
     Left := 0;
     Top := 0;
@@ -740,7 +740,7 @@ begin
     Enabled := False;
   end;
 
-  // Page 9: LibreOffice (after auto-update — powers Office previews AND legacy .doc search indexing)
+  // Page 9: LibreOffice (after auto-update â€” powers Office previews AND legacy .doc search indexing)
   LibreOfficeDetected := IsLibreOfficeInstalled;
 
   LibreOfficePage := CreateCustomPage(
@@ -774,7 +774,7 @@ begin
                  '(Word, Excel, PowerPoint) to PDF so they preview in the browser, and it' + #13#10 +
                  'reads older .doc files so their contents can be searched.' + #13#10 + #13#10 +
                  'Without it, Office documents can still be downloaded, and older .doc' + #13#10 +
-                 'files can still be found by name — but you will not be able to search' + #13#10 +
+                 'files can still be found by name â€” but you will not be able to search' + #13#10 +
                  'inside them. In a long-established library that is often a large share' + #13#10 +
                  'of the collection.' + #13#10 + #13#10 +
                  'LibreOffice is free and open-source (approx. 350 MB download).';

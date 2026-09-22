@@ -191,20 +191,23 @@ public sealed class UpdateService : IDisposable
             response.EnsureSuccessStatusCode();
 
             var totalBytes = response.Content.Headers.ContentLength ?? -1;
-            await using var contentStream = await response.Content.ReadAsStreamAsync();
-            await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.Read, 81920, true);
-
-            var buffer = new byte[81920];
-            long bytesRead = 0;
-            int read;
-            while ((read = await contentStream.ReadAsync(buffer)) > 0)
+            // Both streams must be CLOSED before extraction — a method-scoped `await using var`
+            // here kept the zip open and made every extract fail "in use by another process".
+            await using (var contentStream = await response.Content.ReadAsStreamAsync())
+            await using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.Read, 81920, true))
             {
-                await fileStream.WriteAsync(buffer.AsMemory(0, read));
-                bytesRead += read;
-                if (totalBytes > 0)
+                var buffer = new byte[81920];
+                long bytesRead = 0;
+                int read;
+                while ((read = await contentStream.ReadAsync(buffer)) > 0)
                 {
-                    DownloadProgress = (double)bytesRead / totalBytes;
-                    OnUpdateChecked?.Invoke();
+                    await fileStream.WriteAsync(buffer.AsMemory(0, read));
+                    bytesRead += read;
+                    if (totalBytes > 0)
+                    {
+                        DownloadProgress = (double)bytesRead / totalBytes;
+                        OnUpdateChecked?.Invoke();
+                    }
                 }
             }
 

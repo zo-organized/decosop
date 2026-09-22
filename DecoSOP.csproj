@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -7,7 +7,7 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <Version>2.2.0</Version>
+    <Version>2.2.1</Version>
     <!-- The installer packages from .\publish, so publish output lands inside the project
          folder. Without this, the next "dotnet build" globs publish\wwwroot as project content
          and fails with BLAZOR106 on the scoped JS it finds there. The test project lives under
