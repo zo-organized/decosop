@@ -1,15 +1,20 @@
 @page "/sops/{Id:int}"
+@page "/documents/{Id:int}"
 @using DecoSOP.Services
 @using DecoSOP.Models
 @inject SopFileService SopFileService
+@inject DocumentService DocService
 @inject UserPreferenceService Prefs
 @inject DataCacheService Cache
 @inject ContextMenuState MenuState
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-<div data-mode="sop"></div>
-<PageTitle>@(document?.Title ?? "SOP") - DecoSOP</PageTitle>
+@if (IsSop)
+{
+    <div data-mode="sop"></div>
+}
+<PageTitle>@(document?.Title ?? Noun) - DecoSOP</PageTitle>
 
 @if (document is null)
 {
@@ -26,7 +31,7 @@ else
             <button class="btn-star btn-star-lg @(isFavorited ? "starred" : "")"
                     title="@(isFavorited ? "Remove from favorites" : "Add to favorites")"
                     @onclick="ToggleFavorite">
-                @(isFavorited ? "\u2605" : "\u2606")
+                @(isFavorited ? "★" : "☆")
             </button>
             <div class="sop-actions">
                 @if (openUri is not null)
@@ -38,7 +43,7 @@ else
                     <button class="btn btn-sm btn-outline-secondary" @onclick="PrintDocument">Print</button>
                 }
                 <button class="btn btn-sm btn-outline-primary" @onclick="ToggleReplacePanel">Replace file</button>
-                <a class="btn btn-sm btn-primary" href="/api/sops/@document.Id/download" target="_blank">Download</a>
+                <a class="btn btn-sm btn-primary" href="/api/@Prefix/@document.Id/download" target="_blank">Download</a>
             </div>
         </div>
 
@@ -64,13 +69,13 @@ else
         @if (isImage)
         {
             <div class="doc-preview">
-                <img src="/api/sops/@document.Id/preview" alt="@document.Title" class="doc-preview-image" />
+                <img src="/api/@Prefix/@document.Id/preview" alt="@document.Title" class="doc-preview-image" />
             </div>
         }
         else if (isPdf)
         {
             <div class="doc-preview">
-                <iframe src="@($"/api/sops/{document.Id}/preview{PdfViewerFragment}")" class="doc-preview-frame"></iframe>
+                <iframe src="@($"/api/{Prefix}/{document.Id}/preview{PdfViewerFragment}")" class="doc-preview-frame"></iframe>
             </div>
         }
         else if (isConvertible)
@@ -116,7 +121,7 @@ else
                 </div>
             </div>
             <div class="download-section">
-                <a class="download-btn" href="/api/sops/@document.Id/download" target="_blank">
+                <a class="download-btn" href="/api/@Prefix/@document.Id/download" target="_blank">
                     Download @document.FileName
                 </a>
             </div>
@@ -140,7 +145,11 @@ else
 
     [Parameter] public int Id { get; set; }
 
-    private SopFile? document;
+    private bool IsSop => !Nav.Uri.Contains("/documents/", StringComparison.OrdinalIgnoreCase);
+    private string Noun => IsSop ? "SOP" : "Document";
+    private string Prefix => IsSop ? "sops" : "documents";
+
+    private IFileNode? document;
     private string categoryPath = string.Empty;
     private bool isFavorited;
     private bool converting;
@@ -159,21 +168,29 @@ else
     private string? openUri;
     private string? openApp;
 
+    private async Task<IFileNode?> LoadDocumentAsync()
+        => IsSop
+            ? await Cache.RunExclusiveAsync(() => SopFileService.GetDocumentAsync(Id))
+            : await Cache.RunExclusiveAsync(() => DocService.GetDocumentAsync(Id));
+
     protected override async Task OnParametersSetAsync()
     {
-        document = await Cache.RunExclusiveAsync(() => SopFileService.GetDocumentAsync(Id));
+        document = await LoadDocumentAsync();
         pdfLoaded = false;
         converting = false;
         openUri = null;
         openApp = null;
         if (document is not null)
         {
-            categoryPath = await Cache.RunExclusiveAsync(() => SopFileService.GetCategoryPathAsync(document.CategoryId));
-            var prefs = await Cache.GetSopFilePrefsAsync();
+            categoryPath = IsSop
+                ? await Cache.RunExclusiveAsync(() => SopFileService.GetCategoryPathAsync(document.CategoryId))
+                : await Cache.RunExclusiveAsync(() => DocService.GetCategoryPathAsync(document.CategoryId));
+            var prefs = await (IsSop ? Cache.GetSopFilePrefsAsync() : Cache.GetDocDocPrefsAsync());
             isFavorited = prefs.TryGetValue(Id, out var p) && p.IsFavorited;
             openApp = OfficeProtocol.For(document.FileName)?.App;
             openUri = OfficeProtocol.OpenForEditUri(document.FileName, document.StoredFileName,
-                DecoSOP.Services.SopFileService.OpenBase, SopFileService.GetFilePath(document));
+                IsSop ? SopFileService.OpenBase : DocumentService.OpenBase,
+                IsSop ? SopFileService.GetFilePath((SopFile)document) : DocService.GetFilePath((OfficeDocument)document));
         }
     }
 
@@ -185,7 +202,8 @@ else
             converting = true;
             StateHasChanged();
 
-            var pdfUrl = $"/api/sops/{document.Id}/preview-pdf";
+            // The server converts on first access and caches for subsequent views
+            var pdfUrl = $"/api/{Prefix}/{document.Id}/preview-pdf";
             await JS.InvokeVoidAsync("documentInterop.loadPdfPreview", "pdf-preview-frame", pdfUrl);
 
             converting = false;
@@ -196,16 +214,17 @@ else
     private void GoBack()
     {
         if (document is not null)
-            Nav.NavigateTo($"/sops/category/{document.CategoryId}");
+            Nav.NavigateTo($"/{Prefix}/category/{document.CategoryId}");
         else
-            Nav.NavigateTo("/sops");
+            Nav.NavigateTo($"/{Prefix}");
     }
 
     private async Task ToggleFavorite()
     {
         if (document is null) return;
-        isFavorited = await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(nameof(SopFile), document.Id));
-        Cache.InvalidateSopFavorites();
+        var entity = IsSop ? nameof(SopFile) : nameof(OfficeDocument);
+        isFavorited = await Cache.RunExclusiveAsync(() => Prefs.ToggleFavoriteAsync(entity, document.Id));
+        if (IsSop) Cache.InvalidateSopFavorites(); else Cache.InvalidateDocFavorites();
     }
 
     private async Task PrintDocument()
@@ -214,16 +233,12 @@ else
 
         if (isConvertible)
         {
-            await JS.InvokeVoidAsync("documentInterop.printPdf", $"/api/sops/{document.Id}/preview-pdf");
+            // Open the converted PDF in a new tab and print it directly
+            await JS.InvokeVoidAsync("documentInterop.printPdf", $"/api/{Prefix}/{document.Id}/preview-pdf");
         }
-        else if (isPdf)
+        else if (isPdf || isImage)
         {
-            var previewUrl = $"/api/sops/{document.Id}/preview";
-            await JS.InvokeVoidAsync("documentInterop.printFile", previewUrl, document.ContentType, document.Title);
-        }
-        else if (isImage)
-        {
-            var previewUrl = $"/api/sops/{document.Id}/preview";
+            var previewUrl = $"/api/{Prefix}/{document.Id}/preview";
             await JS.InvokeVoidAsync("documentInterop.printFile", previewUrl, document.ContentType, document.Title);
         }
     }
@@ -248,10 +263,18 @@ else
         replaceError = string.Empty;
         try
         {
-            await Cache.RunExclusiveAsync(() => SopFileService.ReplaceFileAsync(document.Id, replaceFile));
-            Cache.InvalidateSop();
+            if (IsSop)
+            {
+                await Cache.RunExclusiveAsync(() => SopFileService.ReplaceFileAsync(document.Id, replaceFile));
+                Cache.InvalidateSop();
+            }
+            else
+            {
+                await Cache.RunExclusiveAsync(() => DocService.ReplaceFileAsync(document.Id, replaceFile));
+                Cache.InvalidateDoc();
+            }
             await MenuState.NotifyCategoryModified();
-            document = await Cache.RunExclusiveAsync(() => SopFileService.GetDocumentAsync(Id));
+            document = await LoadDocumentAsync();
             showReplacePanel = false;
             replaceFile = null;
             pdfLoaded = false; // re-trigger preview regeneration from the updated file
@@ -265,5 +288,4 @@ else
             isReplacing = false;
         }
     }
-
 }
