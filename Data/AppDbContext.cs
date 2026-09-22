@@ -12,7 +12,6 @@ public class AppDbContext : DbContext
     public DbSet<SopCategory> SopCategories => Set<SopCategory>();
     public DbSet<SopFile> SopFiles => Set<SopFile>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
-    // Inventory lives in Azure SQL via InventoryDbContext — not here.
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,7 +56,5 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(d => new { d.CategoryId, d.Title }).IsUnique();
         });
-
-        // Inventory entities are configured in InventoryDbContext (Azure SQL).
     }
 }

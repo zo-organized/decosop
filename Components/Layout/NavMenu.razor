@@ -4,7 +4,6 @@
 @inject DataCacheService Cache
 @inject SopFileService SopFileService
 @inject DocumentService DocService
-@inject InventoryService InvService
 @inject NavigationManager Nav
 @inject ContextMenuState MenuState
 @inject UserPreferenceService Prefs
@@ -23,7 +22,6 @@
 <div class="mode-toggle px-3 py-2" data-mode="@currentMode">
     <button class="mode-toggle-btn @(currentMode == "sop" ? "active" : "")" @onclick="@(() => SwitchMode("sop"))">SOPs</button>
     <button class="mode-toggle-btn @(currentMode == "doc" ? "active" : "")" @onclick="@(() => SwitchMode("doc"))">Docs</button>
-    <button class="mode-toggle-btn @(currentMode == "inv" ? "active" : "")" @onclick="@(() => SwitchMode("inv"))">Inventory</button>
 </div>
 
 <div class="sidebar-content">
@@ -31,7 +29,7 @@
        including Favorites, where there is otherwise no way to reach it. *@
     <div class="sidebar-search px-3 py-2">
         <input type="text" class="form-control form-control-sm" aria-label="Search SOPs and documents"
-               placeholder="@searchPlaceholder"
+               placeholder="Search SOPs and documents..."
                @bind="searchQuery" @bind:event="oninput" @bind:after="OnSearchChanged" @onkeyup="OnSearchKeyUp" />
     </div>
 
@@ -62,24 +60,7 @@
                             <span class="nav-section-title">SOPs</span>
                         </span>
                     </div>
-                    @foreach (var cat in sopFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/category/{cat.Id}")">
-                                <FolderIcon Color="@GetSopCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in sopFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
+                    @FavoriteLinks(sopFavoriteCategories, SopFavoriteDocLinks, "sops", sopCatPrefs)
                 }
 
                 @if (docFavoriteCategories.Count > 0 || docFavoriteDocuments.Count > 0)
@@ -89,86 +70,16 @@
                             <span class="nav-section-title">Documents</span>
                         </span>
                     </div>
-                    @foreach (var cat in docFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"documents/category/{cat.Id}")">
-                                <FolderIcon Color="@GetDocCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in docFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"documents/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-
-                @if (invFavoriteCategories.Count > 0 || invFavoriteItems.Count > 0)
-                {
-                    <div class="nav-section px-3">
-                        <span class="nav-section-toggle" style="cursor:default;">
-                            <span class="nav-section-title">Inventory</span>
-                        </span>
-                    </div>
-                    @foreach (var cat in invFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"inventory/category/{cat.Id}")">
-                                <FolderIcon Color="@GetInvCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var item in invFavoriteItems)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
-                                @item.Title
-                                <span class="nav-category-hint">@item.Category?.Name</span>
-                            </NavLink>
-                        </div>
-                    }
+                    @FavoriteLinks(docFavoriteCategories, DocFavoriteDocLinks, "documents", docCatPrefs)
                 }
 
                 @if (sopFavoriteCategories.Count == 0 && sopFavoriteDocuments.Count == 0
-                  && docFavoriteCategories.Count == 0 && docFavoriteDocuments.Count == 0
-                  && invFavoriteCategories.Count == 0 && invFavoriteItems.Count == 0)
+                  && docFavoriteCategories.Count == 0 && docFavoriteDocuments.Count == 0)
                 {
                     <div class="px-3 py-2 text-muted small">No favorites yet.</div>
                 }
             }
         </nav>
-    }
-    else
-    {
-    @* Inventory still answers in the sidebar; it has no main-view results surface of its own.
-       SOP and Document searching now renders in the main view, so the folder tree below stays
-       put and you never lose your place in it while searching. *@
-    @if (isSearching && currentMode == "inv")
-    {
-        <div class="nav-section px-3 py-1">
-            <span class="nav-section-title">Search Results</span>
-        </div>
-
-        @foreach (var item in invSearchResults)
-        {
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
-                    @item.Title
-                    <span class="nav-category-hint">@item.Category?.Name</span>
-                </NavLink>
-            </div>
-        }
-        @if (invSearchResults.Count == 0)
-        {
-            <div class="px-3 py-2 text-muted small">No results found.</div>
-        }
     }
     else
     {
@@ -187,66 +98,11 @@
             {
                 @if (currentMode == "doc")
                 {
-                    @foreach (var cat in docFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"documents/category/{cat.Id}")">
-                                <FolderIcon Color="@GetDocCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in docFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"documents/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
-                }
-                else if (currentMode == "inv")
-                {
-                    @foreach (var cat in invFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"inventory/category/{cat.Id}")">
-                                <FolderIcon Color="@GetInvCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var item in invFavoriteItems)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
-                                @item.Title
-                                <span class="nav-category-hint">@item.Category?.Name</span>
-                            </NavLink>
-                        </div>
-                    }
+                    @FavoriteLinks(docFavoriteCategories, DocFavoriteDocLinks, "documents", docCatPrefs)
                 }
                 else
                 {
-                    @foreach (var cat in sopFavoriteCategories)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/category/{cat.Id}")">
-                                <FolderIcon Color="@GetSopCatColor(cat.Id)" />@cat.Name
-                                <span class="nav-category-hint">folder</span>
-                            </NavLink>
-                        </div>
-                    }
-                    @foreach (var doc in sopFavoriteDocuments)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
-                                @doc.Title
-                                <span class="nav-category-hint">@doc.Category.Name</span>
-                            </NavLink>
-                        </div>
-                    }
+                    @FavoriteLinks(sopFavoriteCategories, SopFavoriteDocLinks, "sops", sopCatPrefs)
                 }
 
                 <hr class="sidebar-divider" />
@@ -272,27 +128,21 @@
             }
             else if (currentMode == "doc")
             {
-                @foreach (var category in docCategories!.OrderByDescending(c => IsDocCatPinned(c.Id)).ThenBy(c => c.Name))
+                @foreach (var category in docCategories!.OrderByDescending(c => IsPinned(docCatPrefs, c.Id)).ThenBy(c => c.Name))
                 {
-                    @RenderDocCategoryTree(category, 0)
-                }
-            }
-            else if (currentMode == "inv")
-            {
-                @foreach (var category in invCategories!.OrderByDescending(c => IsInvCatPinned(c.Id)).ThenBy(c => c.Name))
-                {
-                    @RenderInvCategoryTree(category, 0)
+                    @RenderTree(category, 0, "documents", CategoryType.Document, docCatPrefs, expandedDocCategories,
+                        c => c.Children, c => c.Documents.Select(d => (d.Id, d.Title)), c => c.Documents.Count)
                 }
             }
             else
             {
-                @foreach (var category in sopCategories!.OrderByDescending(c => IsSopCatPinned(c.Id)).ThenBy(c => c.Name))
+                @foreach (var category in sopCategories!.OrderByDescending(c => IsPinned(sopCatPrefs, c.Id)).ThenBy(c => c.Name))
                 {
-                    @RenderSopCategoryTree(category, 0)
+                    @RenderTree(category, 0, "sops", CategoryType.Sop, sopCatPrefs, expandedSopCategories,
+                        c => c.Children, c => c.Documents.Select(d => (d.Id, d.Title)), c => c.Documents.Count)
                 }
             }
         </nav>
-    }
     }
 </div>
 
@@ -315,34 +165,18 @@
     private List<DocumentCategory> docFavoriteCategories = [];
     private List<OfficeDocument> docFavoriteDocuments = [];
 
-    private List<InventoryCategory>? invCategories;
-    private List<InventoryCategory> invFavoriteCategories = [];
-    private List<InventoryItem> invFavoriteItems = [];
-    private List<InventoryItem> invSearchResults = [];
-
     // --- Per-user preference dictionaries ---
     private Dictionary<int, UserPreference> sopCatPrefs = new();
     private Dictionary<int, UserPreference> docCatPrefs = new();
-    private Dictionary<int, UserPreference> invCatPrefs = new();
 
-    private bool IsSopCatFavorited(int id) => sopCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
-    private bool IsSopCatPinned(int id) => sopCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
-    private string? GetSopCatColor(int id) => sopCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
-
-    private bool IsDocCatFavorited(int id) => docCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
-    private bool IsDocCatPinned(int id) => docCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
-    private string? GetDocCatColor(int id) => docCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
-
-    private bool IsInvCatFavorited(int id) => invCatPrefs.TryGetValue(id, out var p) && p.IsFavorited;
-    private bool IsInvCatPinned(int id) => invCatPrefs.TryGetValue(id, out var p) && p.IsPinned;
-    private string? GetInvCatColor(int id) => invCatPrefs.TryGetValue(id, out var p) ? p.Color : null;
+    private static bool IsFavorited(Dictionary<int, UserPreference> prefs, int id) => prefs.TryGetValue(id, out var p) && p.IsFavorited;
+    private static bool IsPinned(Dictionary<int, UserPreference> prefs, int id) => prefs.TryGetValue(id, out var p) && p.IsPinned;
+    private static string? GetColor(Dictionary<int, UserPreference> prefs, int id) => prefs.TryGetValue(id, out var p) ? p.Color : null;
 
     // --- Shared state ---
     private HashSet<int> expandedSopCategories = [];
     private HashSet<int> expandedDocCategories = [];
-    private HashSet<int> expandedInvCategories = [];
     private string searchQuery = string.Empty;
-    private bool isSearching => !string.IsNullOrWhiteSpace(searchQuery);
     private bool favoritesExpanded = true;
     private System.Timers.Timer? debounceTimer;
 
@@ -358,7 +192,6 @@
             // Documents does not silently swap the sidebar to the SOP tree and strand you there.
             if (uri.Contains("/search", StringComparison.OrdinalIgnoreCase)) return ModeFromQuery(uri);
             if (uri.Contains("/documents", StringComparison.OrdinalIgnoreCase)) return "doc";
-            if (uri.Contains("/inventory", StringComparison.OrdinalIgnoreCase)) return "inv";
             return "sop";
         }
     }
@@ -371,7 +204,7 @@
             if (query.TryGetValue("from", out var from))
             {
                 var value = from.ToString();
-                if (value is "doc" or "inv" or "sop") return value;
+                if (value is "doc" or "sop") return value;
             }
         }
         catch (UriFormatException) { }
@@ -382,21 +215,13 @@
     {
         "favorites" => _favoritesLoaded ? (object)true : null,
         "doc" => docCategories,
-        "inv" => invCategories,
         _ => sopCategories
-    };
-
-    private string searchPlaceholder => currentMode switch
-    {
-        "inv" => "Search inventory...",
-        _ => "Search SOPs and documents..."
     };
 
     private string homeHref => currentMode switch
     {
         "favorites" => "favorites",
         "doc" => "documents",
-        "inv" => "inventory",
         _ => ""
     };
 
@@ -404,7 +229,6 @@
     {
         "favorites" => false,
         "doc" => docFavoriteCategories.Count > 0 || docFavoriteDocuments.Count > 0,
-        "inv" => invFavoriteCategories.Count > 0 || invFavoriteItems.Count > 0,
         _ => sopFavoriteCategories.Count > 0 || sopFavoriteDocuments.Count > 0
     };
 
@@ -412,7 +236,6 @@
     {
         "favorites" => 0,
         "doc" => docFavoriteCategories.Count + docFavoriteDocuments.Count,
-        "inv" => invFavoriteCategories.Count + invFavoriteItems.Count,
         _ => sopFavoriteCategories.Count + sopFavoriteDocuments.Count
     };
 
@@ -455,7 +278,7 @@
             await Task.Run(async () => await LoadModeData(mode), _cts.Token);
             StateHasChanged();
 
-            foreach (var m in new[] { "sop", "doc", "inv" })
+            foreach (var m in new[] { "sop", "doc" })
             {
                 if (m != mode)
                     await Task.Run(async () => await LoadModeData(m), _cts.Token);
@@ -497,7 +320,6 @@
                 else
                 {
                     searchQuery = string.Empty;
-                    invSearchResults = [];
                 }
                 StateHasChanged();
             });
@@ -531,7 +353,6 @@
         Nav.NavigateTo(mode switch
         {
             "doc" => "/documents",
-            "inv" => "/inventory",
             _ => "/"
         });
     }
@@ -545,11 +366,8 @@
                 sopFavoriteDocuments = await Cache.GetSopFavoriteDocumentsAsync();
                 docFavoriteCategories = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavoriteDocuments = await Cache.GetDocFavoriteDocumentsAsync();
-                invFavoriteCategories = await Cache.GetInvFavoriteCategoriesAsync();
-                invFavoriteItems = await Cache.GetInvFavoriteItemsAsync();
                 sopCatPrefs = await Cache.GetSopCategoryPrefsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                invCatPrefs = await Cache.GetInvCategoryPrefsAsync();
                 _favoritesLoaded = true;
                 break;
             case "doc":
@@ -557,12 +375,6 @@
                 docFavoriteCategories = await Cache.GetDocFavoriteCategoriesAsync();
                 docFavoriteDocuments = await Cache.GetDocFavoriteDocumentsAsync();
                 docCatPrefs = await Cache.GetDocCategoryPrefsAsync();
-                break;
-            case "inv":
-                invCategories = await Cache.GetInvTreeAsync();
-                invFavoriteCategories = await Cache.GetInvFavoriteCategoriesAsync();
-                invFavoriteItems = await Cache.GetInvFavoriteItemsAsync();
-                invCatPrefs = await Cache.GetInvCategoryPrefsAsync();
                 break;
             default:
                 sopCategories = await Cache.GetSopTreeAsync();
@@ -573,175 +385,91 @@
         }
     }
 
-    // --- SOP (files) tree ---
+    // --- Shared category tree (SOP + Document modules) ---
 
-    private bool IsSopExpanded(int id) => expandedSopCategories.Contains(id);
-
-    private void ToggleSopCategory(int id)
+    private void Toggle(HashSet<int> expanded, int id)
     {
-        if (!expandedSopCategories.Remove(id))
-            expandedSopCategories.Add(id);
+        if (!expanded.Remove(id))
+            expanded.Add(id);
     }
 
-    private int GetSopDocCount(SopCategory cat)
+    private static int CountDocs<TCat>(TCat cat, Func<TCat, IEnumerable<TCat>> children, Func<TCat, int> ownCount)
     {
-        int count = cat.Documents.Count;
-        foreach (var child in cat.Children)
-            count += GetSopDocCount(child);
+        int count = ownCount(cat);
+        foreach (var child in children(cat))
+            count += CountDocs(child, children, ownCount);
         return count;
     }
 
-    private RenderFragment RenderSopCategoryTree(SopCategory category, int depth) => __builder =>
+    private RenderFragment RenderTree<TCat>(TCat category, int depth, string prefix, CategoryType type,
+        Dictionary<int, UserPreference> prefs, HashSet<int> expanded,
+        Func<TCat, IEnumerable<TCat>> children, Func<TCat, IEnumerable<(int Id, string Title)>> docs,
+        Func<TCat, int> ownCount) where TCat : ICategoryNode => __builder =>
     {
         var paddingLeft = $"{1 + depth * 0.75}rem";
         var docPaddingLeft = $"{1.75 + depth * 0.75}rem";
-        var totalCount = GetSopDocCount(category);
+        var totalCount = CountDocs(category, children, ownCount);
 
         <div class="nav-section" style="padding-left: @paddingLeft;"
-             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsSopCatFavorited(category.Id), IsSopCatPinned(category.Id), GetSopCatColor(category.Id), CategoryType.Sop)"
+             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsFavorited(prefs, category.Id), IsPinned(prefs, category.Id), GetColor(prefs, category.Id), type)"
              @oncontextmenu:preventDefault="true">
-            <button class="nav-section-toggle" @onclick="() => ToggleSopCategory(category.Id)">
-                <span class="toggle-icon">@(IsSopExpanded(category.Id) ? "▾" : "▸")</span>
-                <span class="nav-section-title"><FolderIcon Color="@GetSopCatColor(category.Id)" />@category.Name@if (IsSopCatPinned(category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
+            <button class="nav-section-toggle" @onclick="() => Toggle(expanded, category.Id)">
+                <span class="toggle-icon">@(expanded.Contains(category.Id) ? "▾" : "▸")</span>
+                <span class="nav-section-title"><FolderIcon Color="@GetColor(prefs, category.Id)" />@category.Name@if (IsPinned(prefs, category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
                 <span class="nav-section-count">@totalCount</span>
             </button>
         </div>
 
-        @if (IsSopExpanded(category.Id))
+        @if (expanded.Contains(category.Id))
         {
-            @foreach (var child in category.Children.OrderByDescending(c => IsSopCatPinned(c.Id)).ThenBy(c => c.Name))
+            @foreach (var child in children(category).OrderByDescending(c => IsPinned(prefs, c.Id)).ThenBy(c => c.Name))
             {
-                @RenderSopCategoryTree(child, depth + 1)
+                @RenderTree(child, depth + 1, prefix, type, prefs, expanded, children, docs, ownCount)
             }
 
-            @foreach (var doc in category.Documents)
+            @foreach (var doc in docs(category))
             {
                 <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                    <NavLink class="nav-link" href="@($"sops/{doc.Id}")">
+                    <NavLink class="nav-link" href="@($"{prefix}/{doc.Id}")">
                         @doc.Title
                     </NavLink>
                 </div>
             }
 
             <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                <NavLink class="nav-link nav-link-new" href="@($"sops/upload?categoryId={category.Id}")">
+                <NavLink class="nav-link nav-link-new" href="@($"{prefix}/upload?categoryId={category.Id}")">
                     + Upload
                 </NavLink>
             </div>
         }
     };
 
-    // --- Document tree ---
+    // --- Shared favorites links (categories then documents) ---
 
-    private bool IsDocExpanded(int id) => expandedDocCategories.Contains(id);
+    private IEnumerable<(int Id, string Title, string Hint)> SopFavoriteDocLinks
+        => sopFavoriteDocuments.Select(d => (d.Id, d.Title, d.Category.Name));
+    private IEnumerable<(int Id, string Title, string Hint)> DocFavoriteDocLinks
+        => docFavoriteDocuments.Select(d => (d.Id, d.Title, d.Category.Name));
 
-    private void ToggleDocCategory(int id)
+    private RenderFragment FavoriteLinks(IEnumerable<ICategoryNode> cats,
+        IEnumerable<(int Id, string Title, string Hint)> docs, string prefix,
+        Dictionary<int, UserPreference> prefs) => __builder =>
     {
-        if (!expandedDocCategories.Remove(id))
-            expandedDocCategories.Add(id);
-    }
-
-    private int GetDocCount(DocumentCategory cat)
-    {
-        int count = cat.Documents.Count;
-        foreach (var child in cat.Children)
-            count += GetDocCount(child);
-        return count;
-    }
-
-    private RenderFragment RenderDocCategoryTree(DocumentCategory category, int depth) => __builder =>
-    {
-        var paddingLeft = $"{1 + depth * 0.75}rem";
-        var docPaddingLeft = $"{1.75 + depth * 0.75}rem";
-        var totalCount = GetDocCount(category);
-
-        <div class="nav-section" style="padding-left: @paddingLeft;"
-             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsDocCatFavorited(category.Id), IsDocCatPinned(category.Id), GetDocCatColor(category.Id), CategoryType.Document)"
-             @oncontextmenu:preventDefault="true">
-            <button class="nav-section-toggle" @onclick="() => ToggleDocCategory(category.Id)">
-                <span class="toggle-icon">@(IsDocExpanded(category.Id) ? "▾" : "▸")</span>
-                <span class="nav-section-title"><FolderIcon Color="@GetDocCatColor(category.Id)" />@category.Name@if (IsDocCatPinned(category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
-                <span class="nav-section-count">@totalCount</span>
-            </button>
-        </div>
-
-        @if (IsDocExpanded(category.Id))
+        @foreach (var cat in cats)
         {
-            @foreach (var child in category.Children.OrderByDescending(c => IsDocCatPinned(c.Id)).ThenBy(c => c.Name))
-            {
-                @RenderDocCategoryTree(child, depth + 1)
-            }
-
-            @foreach (var doc in category.Documents)
-            {
-                <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                    <NavLink class="nav-link" href="@($"documents/{doc.Id}")">
-                        @doc.Title
-                    </NavLink>
-                </div>
-            }
-
-            <div class="nav-item" style="padding-left: @docPaddingLeft;">
-                <NavLink class="nav-link nav-link-new" href="@($"documents/upload?categoryId={category.Id}")">
-                    + Upload
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"{prefix}/category/{cat.Id}")">
+                    <FolderIcon Color="@GetColor(prefs, cat.Id)" />@cat.Name
+                    <span class="nav-category-hint">folder</span>
                 </NavLink>
             </div>
         }
-    };
-
-    // --- Inventory tree ---
-
-    private bool IsInvExpanded(int id) => expandedInvCategories.Contains(id);
-
-    private void ToggleInvCategory(int id)
-    {
-        if (!expandedInvCategories.Remove(id))
-            expandedInvCategories.Add(id);
-    }
-
-    private int GetInvItemCount(InventoryCategory cat)
-    {
-        int count = cat.Items.Count;
-        foreach (var child in cat.Children)
-            count += GetInvItemCount(child);
-        return count;
-    }
-
-    private RenderFragment RenderInvCategoryTree(InventoryCategory category, int depth) => __builder =>
-    {
-        var paddingLeft = $"{1 + depth * 0.75}rem";
-        var itemPaddingLeft = $"{1.75 + depth * 0.75}rem";
-        var totalCount = GetInvItemCount(category);
-
-        <div class="nav-section" style="padding-left: @paddingLeft;"
-             @oncontextmenu="(e) => MenuState.Show(e.ClientX, e.ClientY, category.Id, category.Name, IsInvCatFavorited(category.Id), IsInvCatPinned(category.Id), GetInvCatColor(category.Id), CategoryType.Inventory)"
-             @oncontextmenu:preventDefault="true">
-            <button class="nav-section-toggle" @onclick="() => ToggleInvCategory(category.Id)">
-                <span class="toggle-icon">@(IsInvExpanded(category.Id) ? "▾" : "▸")</span>
-                <span class="nav-section-title"><FolderIcon Color="@GetInvCatColor(category.Id)" />@category.Name@if (IsInvCatPinned(category.Id)) { <span class="pin-icon" title="Pinned">&#128204;</span> }</span>
-                <span class="nav-section-count">@totalCount</span>
-            </button>
-        </div>
-
-        @if (IsInvExpanded(category.Id))
+        @foreach (var doc in docs)
         {
-            @foreach (var child in category.Children.OrderByDescending(c => IsInvCatPinned(c.Id)).ThenBy(c => c.Name))
-            {
-                @RenderInvCategoryTree(child, depth + 1)
-            }
-
-            @foreach (var item in category.Items)
-            {
-                <div class="nav-item" style="padding-left: @itemPaddingLeft;">
-                    <NavLink class="nav-link" href="@($"inventory?sel={item.Id}")">
-                        @item.Title
-                    </NavLink>
-                </div>
-            }
-
-            <div class="nav-item" style="padding-left: @itemPaddingLeft;">
-                <NavLink class="nav-link nav-link-new" href="@($"inventory/new?categoryId={category.Id}")">
-                    + New Item
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"{prefix}/{doc.Id}")">
+                    @doc.Title
+                    <span class="nav-category-hint">@doc.Hint</span>
                 </NavLink>
             </div>
         }
@@ -775,7 +503,7 @@
     /// <summary>Enter commits immediately rather than waiting out the debounce.</summary>
     private void OnSearchKeyUp(KeyboardEventArgs e)
     {
-        if (e.Key != "Enter" || currentMode == "inv") return;
+        if (e.Key != "Enter") return;
         debounceTimer?.Stop();
         ShowResults();
     }
@@ -785,33 +513,25 @@
     /// browser's built-in clear button, pasting with the mouse, and drag-and-drop all change the
     /// value without ever producing a keystroke.
     /// </summary>
-    private async Task OnSearchChanged()
+    private void OnSearchChanged()
     {
         debounceTimer?.Stop();
         debounceTimer?.Dispose();
 
         if (string.IsNullOrWhiteSpace(searchQuery))
         {
-            invSearchResults = [];
             // Clearing the box leaves the results behind and returns you to where you browse.
-            if (currentMode != "inv" && IsOnResults) Nav.NavigateTo(homeHref, replace: true);
+            if (IsOnResults) Nav.NavigateTo(homeHref, replace: true);
             return;
         }
 
         debounceTimer = new System.Timers.Timer(300);
-        debounceTimer.Elapsed += async (_, _) =>
+        debounceTimer.Elapsed += (_, _) =>
         {
             debounceTimer?.Stop();
-            await InvokeAsync(async () =>
+            _ = InvokeAsync(() =>
             {
-                if (currentMode == "inv")
-                {
-                    invSearchResults = await Cache.RunExclusiveAsync(() => InvService.GetItemsAsync(null, null, null, searchQuery));
-                }
-                else
-                {
-                    ShowResults();
-                }
+                ShowResults();
                 StateHasChanged();
             });
         };
