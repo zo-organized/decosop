@@ -128,12 +128,14 @@ Type: filesandordirs; Name: "{app}\wwwroot"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\port.config"
 Type: files; Name: "{app}\update-config.json"
-; NOTE: rclone.exe / rclone.conf / rclone-bisync.ps1 are deliberately NOT deleted.
-; The upgrade path runs this uninstaller silently, and deleting them would destroy the
-; authenticated sync configuration on every upgrade (this killed sync in production on
-; the 2026-08-27 v2.1.0 upgrade). They are small and harmless to leave on a real uninstall.
+; NOTE: rclone.exe / rclone.conf / rclone-bisync.ps1 and appsettings.Production.json
+; are deliberately NOT deleted. The upgrade path runs this uninstaller silently, and
+; deleting them destroys the sync configuration on every upgrade: the rclone files hold
+; the authenticated remote (this killed sync on the 2026-08-27 v2.1.0 upgrade), and
+; appsettings.Production.json holds the FolderSync roots + Enabled flag (deleting it
+; silently disabled indexing on the 2026-09-23 v2.2.1 upgrade). They are small and
+; harmless to leave on a real uninstall.
 Type: files; Name: "{app}\rclone.conf.old*"
-Type: files; Name: "{app}\appsettings.Production.json"
 ; The full-text search index is derived data â€” it rebuilds itself from the documents â€” so
 ; unlike the database it is not worth preserving across an uninstall.
 Type: files; Name: "{app}\decosop-search.db"
@@ -359,15 +361,16 @@ procedure BackupSyncConfig;
 var
   I: Integer;
   AppDir: String;
-  Names: array[0..2] of String;
+  Names: array[0..3] of String;
 begin
   Names[0] := 'rclone.conf';
   Names[1] := 'rclone-bisync.ps1';
   Names[2] := 'rclone.exe';
+  Names[3] := 'appsettings.Production.json';
   AppDir := GetInstallLocation;
   SyncBackupDir := ExpandConstant('{tmp}\sync-backup');
   ForceDirectories(SyncBackupDir);
-  for I := 0 to 2 do
+  for I := 0 to 3 do
     if FileExists(AppDir + '\' + Names[I]) then
       CopyFile(AppDir + '\' + Names[I], SyncBackupDir + '\' + Names[I], False);
 end;
@@ -376,7 +379,7 @@ procedure RestoreSyncConfig;
 var
   I, ResultCode: Integer;
   AppDir, Src, Dest: String;
-  Names: array[0..2] of String;
+  Names: array[0..3] of String;
 begin
   AppDir := ExpandConstant('{app}');
   if SyncBackupDir <> '' then
@@ -384,7 +387,8 @@ begin
     Names[0] := 'rclone.conf';
     Names[1] := 'rclone-bisync.ps1';
     Names[2] := 'rclone.exe';
-    for I := 0 to 2 do
+    Names[3] := 'appsettings.Production.json';
+    for I := 0 to 3 do
     begin
       Src := SyncBackupDir + '\' + Names[I];
       Dest := AppDir + '\' + Names[I];
