@@ -1,6 +1,7 @@
 using DecoSOP.Data;
 using DecoSOP.Models;
 using DecoSOP.Services.Extraction;
+using DecoSOP.Services.Online;
 using Microsoft.EntityFrameworkCore;
 
 namespace DecoSOP.Services.Search;
@@ -19,6 +20,7 @@ namespace DecoSOP.Services.Search;
 public sealed class SearchIndexBackgroundService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IDbContextFactory<OnlineDbContext> _onlineDbFactory;
     private readonly SearchDb _searchDb;
     private readonly SearchIndexService _index;
     private readonly TextExtractionService _extraction;
@@ -46,11 +48,13 @@ public sealed class SearchIndexBackgroundService : BackgroundService
     public DateTime? LastRunUtc { get; private set; }
 
     public SearchIndexBackgroundService(
-        IServiceScopeFactory scopeFactory, SearchDb searchDb, SearchIndexService index,
+        IServiceScopeFactory scopeFactory, IDbContextFactory<OnlineDbContext> onlineDbFactory,
+        SearchDb searchDb, SearchIndexService index,
         TextExtractionService extraction, SyncNotificationService syncNotify,
         ILogger<SearchIndexBackgroundService> logger)
     {
         _scopeFactory = scopeFactory;
+        _onlineDbFactory = onlineDbFactory;
         _searchDb = searchDb;
         _index = index;
         _extraction = extraction;
@@ -154,28 +158,39 @@ public sealed class SearchIndexBackgroundService : BackgroundService
                 await _index.SetMissingAsync(module, fileId, path, ct);
             }
 
-            if (work.ToIndex.Count == 0 && work.ToRemove.Count == 0)
+            if (work.ToIndex.Count == 0 && work.OnlineToIndex.Count == 0 && work.ToRemove.Count == 0)
             {
                 LastRunUtc = DateTime.UtcNow;
                 return;
             }
 
-            _logger.LogInformation("Search index: {Index} file(s) to index, {Remove} to remove",
-                work.ToIndex.Count, work.ToRemove.Count);
+            _logger.LogInformation("Search index: {Index} file(s) and {Online} online page(s) to index, {Remove} to remove",
+                work.ToIndex.Count, work.OnlineToIndex.Count, work.ToRemove.Count);
 
             IsIndexing = true;
-            QueuedTotal = work.ToIndex.Count;
+            QueuedTotal = work.ToIndex.Count + work.OnlineToIndex.Count;
             QueuedDone = 0;
 
             // Claim the whole queue up front so the Settings panel and the search page banner
             // can show honest progress instead of a permanent 100%.
             await _index.MarkPendingAsync(
-                work.ToIndex.Select(f => (f.Module, f.FileId, f.StoredPath)).ToList(), ct);
+                work.ToIndex.Select(f => (f.Module, f.FileId, f.StoredPath))
+                    .Concat(work.OnlineToIndex.Select(p => (p.Module, p.PageId, p.StoredPath)))
+                    .ToList(), ct);
 
             foreach (var (module, fileId) in work.ToRemove)
             {
                 ct.ThrowIfCancellationRequested();
                 await _index.RemoveAsync(module, fileId, ct);
+            }
+
+            // ONLINE pages first: they are a handful of database reads, not file extraction, and
+            // someone who just saved a page expects to find it straight away.
+            foreach (var page in work.OnlineToIndex)
+            {
+                ct.ThrowIfCancellationRequested();
+                await IndexOnlinePageAsync(page, ct);
+                QueuedDone++;
             }
 
             for (var i = 0; i < work.ToIndex.Count; i += BatchSize)
@@ -188,7 +203,7 @@ public sealed class SearchIndexBackgroundService : BackgroundService
             }
 
             LastRunUtc = DateTime.UtcNow;
-            _logger.LogInformation("Search index pass complete: {Count} file(s) processed", work.ToIndex.Count);
+            _logger.LogInformation("Search index pass complete: {Count} item(s) processed", QueuedTotal);
         }
         finally
         {
@@ -229,13 +244,41 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         }
     }
 
+    private async Task IndexOnlinePageAsync(PendingOnlinePage page, CancellationToken ct)
+    {
+        await using var db = await _onlineDbFactory.CreateDbContextAsync(ct);
+        var html = await db.Pages.AsNoTracking()
+            .Where(p => p.Id == page.PageId && p.DeletedAt == null)
+            .Select(p => p.Html)
+            .FirstOrDefaultAsync(ct);
+        if (html is null) return;   // deleted since discovery; the next pass removes it
+
+        var body = OnlineHtml.ToPlainText(html);
+        var status = body.Length > 0 ? "ok" : "empty";
+
+        await _index.UpsertAsync(
+            new SearchDocument(page.Module, page.PageId, page.Title, page.SectionPath, page.Title + ".html", body),
+            "online", status, null, ct);
+        await _index.SetStateAsync(page.Module, page.PageId, page.StoredPath, page.UpdatedAtUtc,
+            page.Version, "online", status, body.Length, null, incrementAttempts: false, ct);
+    }
+
     // ---------- work discovery ----------
 
     private sealed record PendingFile(
         string Module, int FileId, string Title, string CategoryPath, string FileName,
         string StoredPath, string FullPath, DateTime MtimeUtc, long Size);
 
-    private sealed record WorkSet(List<PendingFile> ToIndex, List<(string Module, int FileId)> ToRemove,
+    /// <summary>
+    /// An ONLINE page awaiting indexing. Its fingerprint is (UpdatedAt, Version) in place of a
+    /// file's (mtime, size), stored in the same IndexState columns.
+    /// </summary>
+    private sealed record PendingOnlinePage(
+        string Module, int PageId, string Title, string SectionPath, string StoredPath,
+        DateTime UpdatedAtUtc, int Version);
+
+    private sealed record WorkSet(List<PendingFile> ToIndex, List<PendingOnlinePage> OnlineToIndex,
+        List<(string Module, int FileId)> ToRemove,
         List<(string Module, int FileId, string StoredPath)> Missing);
 
     private async Task<WorkSet> DiscoverWorkAsync(CancellationToken ct)
@@ -253,10 +296,56 @@ public sealed class SearchIndexBackgroundService : BackgroundService
         await CollectAsync<DocumentCategory, OfficeDocument>(db, SearchDb.ModuleDoc,
             DocumentService.GetUploadDirectory(), state, toIndex, live, missing, ct);
 
+        var onlineToIndex = new List<PendingOnlinePage>();
+        await CollectOnlineAsync(state, onlineToIndex, live, ct);
+
         // Anything the index still holds but the library no longer lists has been deleted.
         var toRemove = state.Keys.Where(k => !live.Contains(k)).ToList();
 
-        return new WorkSet(toIndex, toRemove, missing);
+        return new WorkSet(toIndex, onlineToIndex, toRemove, missing);
+    }
+
+    private async Task CollectOnlineAsync(
+        Dictionary<(string Module, int FileId), (string Mtime, long Size, string Status, int Attempts)> state,
+        List<PendingOnlinePage> toIndex, HashSet<(string, int)> live, CancellationToken ct)
+    {
+        await using var db = await _onlineDbFactory.CreateDbContextAsync(ct);
+
+        var sections = await db.Sections.AsNoTracking()
+            .Select(s => new { s.Id, s.Name, s.ParentId }).ToListAsync(ct);
+        var byId = sections.ToDictionary(s => s.Id);
+
+        string PathFor(int? sectionId)
+        {
+            var parts = new List<string>();
+            var current = sectionId is int sid ? byId.GetValueOrDefault(sid) : null;
+            var guard = 0;
+            while (current is not null && guard++ < 32)
+            {
+                parts.Insert(0, current.Name);
+                current = current.ParentId is int pid ? byId.GetValueOrDefault(pid) : null;
+            }
+            return string.Join(" / ", parts);
+        }
+
+        var pages = await db.Pages.AsNoTracking()
+            .Where(p => p.DeletedAt == null)
+            .Select(p => new { p.Id, p.Module, p.Title, p.SectionId, p.UpdatedAt, p.Version })
+            .ToListAsync(ct);
+
+        foreach (var p in pages)
+        {
+            var module = p.Module == OnlineModule.Doc ? SearchDb.ModuleOnlineDoc : SearchDb.ModuleOnlineSop;
+            live.Add((module, p.Id));
+
+            if (state.TryGetValue((module, p.Id), out var known)
+                && known.Mtime == p.UpdatedAt.ToString("O") && known.Size == p.Version
+                && known.Status is not "pending")
+                continue;
+
+            toIndex.Add(new PendingOnlinePage(module, p.Id, p.Title, PathFor(p.SectionId),
+                $"online/{p.Module}/{p.Id}", p.UpdatedAt, p.Version));
+        }
     }
 
     private static async Task CollectAsync<TCat, TFile>(

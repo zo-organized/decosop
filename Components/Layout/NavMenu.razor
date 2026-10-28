@@ -1,7 +1,9 @@
 @using DecoSOP.Services
 @using DecoSOP.Services.Search
+@using DecoSOP.Services.Online
 @using DecoSOP.Models
 @inject DataCacheService Cache
+@inject OnlineBinderService Online
 @inject SopFileService SopFileService
 @inject DocumentService DocService
 @inject NavigationManager Nav
@@ -10,16 +12,19 @@
 @inject SyncNotificationService SyncNotify
 @implements IDisposable
 
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">
-            <img src="icon.svg" alt="" width="30" height="30" style="margin-right: 0.5rem;" />DecoSOP
-        </a>
-        <a class="btn-favorites-header" href="favorites" title="All Favorites">&#9733;</a>
+@* The app name lives in the blue header (AppHeader); the sidebar opens straight onto the switch.
+   LOCAL = the synced folders (Word/Excel/PDF files); ONLINE = pages written in DecoSOP. *@
+<div class="source-toggle-wrap px-2 pt-2">
+    <div class="source-toggle" role="group" aria-label="Library source">
+        <button class="source-toggle-btn @(IsOnline ? "" : "active")" @onclick="() => SwitchSource(false)"
+                title="SOPs and documents from the synced folders">Local</button>
+        <span class="source-toggle-sep" aria-hidden="true">|</span>
+        <button class="source-toggle-btn @(IsOnline ? "active" : "")" @onclick="() => SwitchSource(true)"
+                title="Pages written here in DecoSOP">Online</button>
     </div>
 </div>
 
-<div class="mode-toggle px-3 py-2" data-mode="@currentMode">
+<div class="mode-toggle px-2 py-1" data-mode="@currentMode">
     <button class="mode-toggle-btn @(currentMode == "sop" ? "active" : "")" @onclick="@(() => SwitchMode("sop"))">SOPs</button>
     <button class="mode-toggle-btn @(currentMode == "doc" ? "active" : "")" @onclick="@(() => SwitchMode("doc"))">Docs</button>
 </div>
@@ -27,13 +32,56 @@
 <div class="sidebar-content">
     @* Above the mode split: searching is the one thing that should work from anywhere,
        including Favorites, where there is otherwise no way to reach it. *@
-    <div class="sidebar-search px-3 py-2">
+    <div class="sidebar-search px-2 py-1">
         <input type="text" class="form-control form-control-sm" aria-label="Search SOPs and documents"
                placeholder="Search SOPs and documents..."
                @bind="searchQuery" @bind:event="oninput" @bind:after="OnSearchChanged" @onkeyup="OnSearchKeyUp" />
     </div>
 
-    @if (currentMode == "favorites")
+    @if (IsOnline)
+    {
+        @* --- ONLINE binder tree --- *@
+        <nav class="nav flex-column">
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@homeHref" Match="NavLinkMatch.All">
+                    Home
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link nav-link-new" href="@OnlineNewPageHref(CurrentOnlineSectionId)" Match="NavLinkMatch.All">
+                    + New page
+                </NavLink>
+            </div>
+
+            @if (CurrentOnlineTree is not OnlineTree tree)
+            {
+                @foreach (var w in skeletonWidths.Take(6))
+                {
+                    <div class="nav-item px-3">
+                        <div class="skeleton-line sidebar-skeleton" style="width:@(w)%;"></div>
+                    </div>
+                }
+            }
+            else
+            {
+                @foreach (var section in tree.Sections)
+                {
+                    @RenderOnlineTree(section, 0)
+                }
+                @foreach (var pg in tree.RootPages)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="@($"{OnlineBase}/page/{pg.Id}")">@pg.Title</NavLink>
+                    </div>
+                }
+                @if (tree.Sections.Count == 0 && tree.RootPages.Count == 0)
+                {
+                    <div class="px-3 py-2 text-muted small">No pages yet.</div>
+                }
+            }
+        </nav>
+    }
+    else if (currentMode == "favorites")
     {
         <nav class="nav flex-column">
             <div class="nav-item px-3">
@@ -182,11 +230,69 @@
 
     private bool _favoritesLoaded;
 
+    // --- ONLINE binder ---
+    private OnlineTree? onlineSopTree;
+    private OnlineTree? onlineDocTree;
+    private HashSet<int> expandedOnlineSections = [];
+
+    /// <summary>
+    /// Whether the sidebar shows the ONLINE binder. Driven by the URL like everything else here,
+    /// so a bookmarked or shared link opens in the right mode. Search results remember it through
+    /// their "from" parameter.
+    /// </summary>
+    private bool IsOnline
+    {
+        get
+        {
+            var path = NavPath;
+            if (path.StartsWith("/online", StringComparison.OrdinalIgnoreCase)) return true;
+            return path.StartsWith("/search", StringComparison.OrdinalIgnoreCase)
+                && FromQuery(Nav.Uri) is "osop" or "odoc";
+        }
+    }
+
+    private string NavPath
+    {
+        get
+        {
+            try { return new Uri(Nav.Uri).AbsolutePath; }
+            catch (UriFormatException) { return "/"; }
+        }
+    }
+
+    private string OnlineModuleKey => currentMode == "doc" ? OnlineModule.Doc : OnlineModule.Sop;
+    private string OnlineBase => $"/online/{OnlineModule.RouteSegment(OnlineModuleKey)}";
+    private OnlineTree? CurrentOnlineTree => currentMode == "doc" ? onlineDocTree : onlineSopTree;
+
+    /// <summary>Which data set the sidebar shows: sop, doc, favorites, osop or odoc.</summary>
+    private string DataKey => IsOnline ? (currentMode == "doc" ? "odoc" : "osop") : currentMode;
+
+    /// <summary>The ONLINE folder the user is looking at (or the folder of the page they are reading).</summary>
+    private int? CurrentOnlineSectionId
+    {
+        get
+        {
+            var parts = NavPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            // /online/{module}/section/{id}  or  /online/{module}/page/{id}[/edit]
+            if (parts.Length >= 4 && int.TryParse(parts[3], out var id))
+            {
+                if (parts[2].Equals("section", StringComparison.OrdinalIgnoreCase)) return id;
+                if (parts[2].Equals("page", StringComparison.OrdinalIgnoreCase)) return CurrentOnlineTree?.SectionOfPage(id);
+            }
+            return null;
+        }
+    }
+
+    private string OnlineNewPageHref(int? sectionId)
+        => sectionId is int sid ? $"{OnlineBase}/new?section={sid}" : $"{OnlineBase}/new";
+
     private string currentMode
     {
         get
         {
             var uri = Nav.Uri;
+            if (NavPath.StartsWith("/online/documents", StringComparison.OrdinalIgnoreCase)) return "doc";
+            if (NavPath.StartsWith("/online", StringComparison.OrdinalIgnoreCase)) return "sop";
             if (uri.Contains("/favorites", StringComparison.OrdinalIgnoreCase)) return "favorites";
             // The results route carries the module it was launched from, so searching out of
             // Documents does not silently swap the sidebar to the SOP tree and strand you there.
@@ -196,36 +302,39 @@
         }
     }
 
-    private static string ModeFromQuery(string uri)
+    private static string? FromQuery(string uri)
     {
         try
         {
             var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(uri).Query);
-            if (query.TryGetValue("from", out var from))
-            {
-                var value = from.ToString();
-                if (value is "doc" or "sop") return value;
-            }
+            return query.TryGetValue("from", out var from) ? from.ToString() : null;
         }
-        catch (UriFormatException) { }
-        return "sop";
+        catch (UriFormatException) { return null; }
     }
 
-    private object? currentModeCategories => currentMode switch
+    private static string ModeFromQuery(string uri) => FromQuery(uri) switch
+    {
+        "doc" or "odoc" => "doc",
+        _ => "sop"
+    };
+
+    private object? currentModeCategories => DataKey switch
     {
         "favorites" => _favoritesLoaded ? (object)true : null,
+        "osop" => onlineSopTree,
+        "odoc" => onlineDocTree,
         "doc" => docCategories,
         _ => sopCategories
     };
 
-    private string homeHref => currentMode switch
+    private string homeHref => IsOnline ? OnlineBase : currentMode switch
     {
         "favorites" => "favorites",
         "doc" => "documents",
         _ => ""
     };
 
-    private bool hasFavorites => currentMode switch
+    private bool hasFavorites => IsOnline ? false : currentMode switch
     {
         "favorites" => false,
         "doc" => docFavoriteCategories.Count > 0 || docFavoriteDocuments.Count > 0,
@@ -273,7 +382,7 @@
     {
         try
         {
-            var mode = currentMode;
+            var mode = DataKey;
 
             await Task.Run(async () => await LoadModeData(mode), _cts.Token);
             StateHasChanged();
@@ -294,7 +403,10 @@
         {
             Cache.InvalidateAll();
             _favoritesLoaded = false;
-            var mode = currentMode;
+            var mode = DataKey;
+            // The ONLINE side not on screen reloads when it is next shown.
+            if (mode != "osop") onlineSopTree = null;
+            if (mode != "odoc") onlineDocTree = null;
             await Task.Run(async () => await LoadModeData(mode), _cts.Token);
             await InvokeAsync(StateHasChanged);
         }
@@ -326,7 +438,7 @@
 
             if (currentModeCategories is null)
             {
-                var mode = currentMode;
+                var mode = DataKey;
                 await Task.Run(async () => await LoadModeData(mode), _cts.Token);
                 await InvokeAsync(StateHasChanged);
             }
@@ -350,6 +462,11 @@
     private void SwitchMode(string mode)
     {
         searchQuery = string.Empty;
+        if (IsOnline)
+        {
+            Nav.NavigateTo(mode == "doc" ? "/online/documents" : "/online/sops");
+            return;
+        }
         Nav.NavigateTo(mode switch
         {
             "doc" => "/documents",
@@ -357,10 +474,27 @@
         });
     }
 
+    /// <summary>Flip between LOCAL and ONLINE, staying on the same SOPs/Docs side.</summary>
+    private void SwitchSource(bool online)
+    {
+        if (online == IsOnline) return;
+        searchQuery = string.Empty;
+        var doc = currentMode == "doc";
+        Nav.NavigateTo(online
+            ? (doc ? "/online/documents" : "/online/sops")
+            : (doc ? "/documents" : "/"));
+    }
+
     private async Task LoadModeData(string mode)
     {
         switch (mode)
         {
+            case "osop":
+                onlineSopTree = await Online.GetTreeAsync(OnlineModule.Sop);
+                break;
+            case "odoc":
+                onlineDocTree = await Online.GetTreeAsync(OnlineModule.Doc);
+                break;
             case "favorites":
                 sopFavoriteCategories = await Cache.GetSopFavoriteCategoriesAsync();
                 sopFavoriteDocuments = await Cache.GetSopFavoriteDocumentsAsync();
@@ -384,6 +518,50 @@
                 break;
         }
     }
+
+    // --- ONLINE binder tree ---
+
+    private RenderFragment RenderOnlineTree(OnlineSectionNode section, int depth) => __builder =>
+    {
+        var paddingLeft = $"{1 + depth * 0.75}rem";
+        var pagePaddingLeft = $"{1.75 + depth * 0.75}rem";
+        var expanded = expandedOnlineSections.Contains(section.Id);
+
+        <div class="nav-section" style="padding-left: @paddingLeft;">
+            <button class="nav-section-toggle" @onclick="() => Toggle(expandedOnlineSections, section.Id)">
+                <span class="toggle-icon">@(expanded ? "▾" : "▸")</span>
+                <span class="nav-section-title"><FolderIcon />@section.Name</span>
+                <span class="nav-section-count">@section.TotalPages</span>
+            </button>
+        </div>
+
+        @if (expanded)
+        {
+            <div class="nav-item" style="padding-left: @pagePaddingLeft;">
+                <NavLink class="nav-link" href="@($"{OnlineBase}/section/{section.Id}")" Match="NavLinkMatch.All">
+                    <em>Contents</em>
+                </NavLink>
+            </div>
+
+            @foreach (var child in section.Children)
+            {
+                @RenderOnlineTree(child, depth + 1)
+            }
+
+            @foreach (var pg in section.Pages)
+            {
+                <div class="nav-item" style="padding-left: @pagePaddingLeft;">
+                    <NavLink class="nav-link" href="@($"{OnlineBase}/page/{pg.Id}")">@pg.Title</NavLink>
+                </div>
+            }
+
+            <div class="nav-item" style="padding-left: @pagePaddingLeft;">
+                <NavLink class="nav-link nav-link-new" href="@OnlineNewPageHref(section.Id)" Match="NavLinkMatch.All">
+                    + New page
+                </NavLink>
+            </div>
+        }
+    };
 
     // --- Shared category tree (SOP + Document modules) ---
 
@@ -497,7 +675,7 @@
     private void ShowResults()
     {
         if (string.IsNullOrWhiteSpace(searchQuery)) return;
-        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}&from={currentMode}", replace: IsOnResults);
+        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(searchQuery)}&from={DataKey}", replace: IsOnResults);
     }
 
     /// <summary>Enter commits immediately rather than waiting out the debounce.</summary>

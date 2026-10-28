@@ -1,0 +1,136 @@
+@using DecoSOP.Services.Users
+@inject LayoutState Layout
+@inject UserListService Lists
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* The list column: the open list's documents and pages, between the menu and the page.
+   Clicking an entry opens it on the right; the column stays put, so you can work down a list. *@
+<aside class="list-panel" aria-label="@summary?.Name">
+    <div class="list-panel-head">
+        <span class="list-panel-title">@AppHeader.ListIcon(Key) @(summary?.Name ?? "List")</span>
+        @if (summary is { IsBuiltIn: false })
+        {
+            <button class="list-panel-btn" @onclick="Rename" title="Rename this list">&#9998;</button>
+            <button class="list-panel-btn" @onclick="Delete" title="Delete this list">&#128465;</button>
+        }
+        <button class="list-panel-btn" @onclick="() => Layout.SetOpenListAsync(null)" title="Close the list">&times;</button>
+    </div>
+
+    @if (entries is null)
+    {
+        <div class="list-panel-empty">Loading…</div>
+    }
+    else if (summary is null)
+    {
+        <div class="list-panel-empty">This list no longer exists.</div>
+    }
+    else if (entries.Count == 0)
+    {
+        <div class="list-panel-empty">
+            Nothing here yet. Open a document or page and use its <strong>Lists</strong> button@(Key == UserListService.FavoritesKey ? " or ☆ star" : "") to add it.
+        </div>
+    }
+    else
+    {
+        <ul class="list-panel-items">
+            @foreach (var e in entries)
+            {
+                <li class="@(IsCurrent(e) ? "active" : "") @(e.Missing ? "missing" : "")">
+                    @if (e.Missing)
+                    {
+                        <span class="list-item-title">@e.Title</span>
+                    }
+                    else
+                    {
+                        <a href="@e.Href" class="list-item-link">
+                            <span class="list-item-title">@e.Title</span>
+                            <span class="list-item-meta">
+                                <span class="file-type-badge badge-@e.Badge.ToLowerInvariant()">@e.Badge</span>
+                                @e.Where
+                            </span>
+                        </a>
+                    }
+                    <button class="list-item-remove" title="Take off this list" @onclick="() => Remove(e)">&times;</button>
+                </li>
+            }
+        </ul>
+    }
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public string Key { get; set; } = "";
+
+    private ListSummary? summary;
+    private List<ListEntry>? entries;
+    private string? loadedKey;
+
+    protected override void OnInitialized()
+    {
+        Lists.Changed += OnListsChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedKey == Key) return;
+        loadedKey = Key;
+        entries = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        summary = (await Lists.GetListsAsync()).FirstOrDefault(l => l.Key == Key);
+        entries = summary is null ? [] : await Lists.GetItemsAsync(Key);
+    }
+
+    private void OnListsChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    // Highlight follows the page being viewed.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => InvokeAsync(StateHasChanged);
+
+    private bool IsCurrent(ListEntry e)
+        => !e.Missing && Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Equals(e.Href.TrimStart('/'), StringComparison.OrdinalIgnoreCase);
+
+    private Task Remove(ListEntry e) => Lists.ToggleAsync(Key, e.EntityType, e.EntityId);
+
+    private async Task Rename()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Rename list:", summary?.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await Run(() => Lists.RenameListAsync(Key, name));
+    }
+
+    private async Task Delete()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete the list \"{summary?.Name}\"? The documents themselves are not affected.")) return;
+        if (await Run(() => Lists.DeleteListAsync(Key)))
+            await Layout.SetOpenListAsync(null);
+    }
+
+    private async Task<bool> Run(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            await JS.InvokeVoidAsync("alert", ex.Message);
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {
+        Lists.Changed -= OnListsChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

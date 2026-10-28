@@ -97,8 +97,8 @@ public class DataCacheService
         return BuildBreadcrumbs(cat, c => c.Parent, c => (c.Id, c.Name));
     }
 
-    public void InvalidateSop() => Remove("sop.tree", "sop.favCats", "sop.favDocs", "sop.catPrefs", "sop.filePrefs");
-    public void InvalidateSopFavorites() => Remove("sop.favCats", "sop.favDocs", "sop.catPrefs", "sop.filePrefs");
+    public void InvalidateSop() { Remove("sop.tree", "sop.favCats", "sop.favDocs", "sop.catPrefs", "sop.filePrefs"); FavoritesChanged?.Invoke(); }
+    public void InvalidateSopFavorites() { Remove("sop.favCats", "sop.favDocs", "sop.catPrefs", "sop.filePrefs"); FavoritesChanged?.Invoke(); }
 
     // ---- Document ----
 
@@ -147,8 +147,11 @@ public class DataCacheService
         return BuildBreadcrumbs(cat, c => c.Parent, c => (c.Id, c.Name));
     }
 
-    public void InvalidateDoc() => Remove("doc.tree", "doc.favCats", "doc.favDocs", "doc.catPrefs", "doc.docPrefs");
-    public void InvalidateDocFavorites() => Remove("doc.favCats", "doc.favDocs", "doc.catPrefs", "doc.docPrefs");
+    public void InvalidateDoc() { Remove("doc.tree", "doc.favCats", "doc.favDocs", "doc.catPrefs", "doc.docPrefs"); FavoritesChanged?.Invoke(); }
+    public void InvalidateDocFavorites() { Remove("doc.favCats", "doc.favDocs", "doc.catPrefs", "doc.docPrefs"); FavoritesChanged?.Invoke(); }
+
+    /// <summary>Fires whenever favorites may have changed, so the header's Favorites list can refresh.</summary>
+    public event Action? FavoritesChanged;
 
     // ---- Invalidate all ----
     public void InvalidateAll() { InvalidateSop(); InvalidateDoc(); }

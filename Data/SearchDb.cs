@@ -34,13 +34,29 @@ public sealed class SearchDb
     public const string ModuleSop = "Sop";
     public const string ModuleDoc = "Doc";
 
+    /// <summary>ONLINE binder pages. Their ids come from decosop-online.db, a separate id space.</summary>
+    public const string ModuleOnlineSop = "OSop";
+    public const string ModuleOnlineDoc = "ODoc";
+
+    public static bool IsOnlineModule(string module) => module is ModuleOnlineSop or ModuleOnlineDoc;
+
     /// <summary>
     /// A stable, collision-free rowid for a (module, file) pair, computed rather than stored.
     /// Interleaving on the module ordinal means a file's index row can be replaced or removed
     /// without first looking up what rowid it was given.
+    ///
+    /// LOCAL files keep the original positive scheme; ONLINE pages take the negative range. That
+    /// keeps every rowid an existing index already holds valid, so adding ONLINE pages does not
+    /// force a full rebuild of a library that takes the better part of half an hour to read.
     /// </summary>
-    public static long RowIdFor(string module, int fileId)
-        => (long)fileId * 2 + (module == ModuleDoc ? 1 : 0);
+    public static long RowIdFor(string module, int fileId) => module switch
+    {
+        ModuleSop => (long)fileId * 2,
+        ModuleDoc => (long)fileId * 2 + 1,
+        ModuleOnlineSop => -((long)fileId * 2 + 1),
+        ModuleOnlineDoc => -((long)fileId * 2 + 2),
+        _ => throw new ArgumentException($"Unknown search module '{module}'.", nameof(module)),
+    };
 
     public async Task<SqliteConnection> OpenAsync(CancellationToken ct = default)
     {

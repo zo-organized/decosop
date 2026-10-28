@@ -1,11 +1,12 @@
 namespace DecoSOP.Services;
 
-public enum SyncScope { Sop, Doc }
+/// <summary>What changed: a LOCAL module (folder reconcile) or an ONLINE binder module (an edit).</summary>
+public enum SyncScope { Sop, Doc, OnlineSop, OnlineDoc }
 
 /// <summary>
-/// In-process pub/sub that bridges the singleton folder-sync background service to
-/// per-circuit Blazor components, so they can invalidate their scoped cache and
-/// re-render after a reconcile makes changes.
+/// In-process pub/sub that bridges singleton writers — the folder-sync background service and
+/// the ONLINE binder — to per-circuit Blazor components, so they can invalidate their scoped
+/// cache and re-render, and to the search indexer, so it picks the change up.
 /// </summary>
 public class SyncNotificationService
 {

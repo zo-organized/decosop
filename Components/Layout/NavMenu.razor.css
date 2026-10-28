@@ -37,6 +37,49 @@
     text-shadow: 0 0 8px rgba(245, 166, 35, 0.5);
 }
 
+/* LOCAL | ONLINE source switch — sits above the SOPs/Docs toggle */
+.source-toggle-wrap {
+    background: rgba(0,0,0,0.2);
+}
+
+.source-toggle {
+    display: flex;
+    align-items: center;
+    background: white;
+    border-radius: 6px;
+    padding: 0.2rem;
+}
+
+.source-toggle-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: #6b6f86;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.35rem 0.25rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.source-toggle-btn:hover {
+    color: #1f1d4d;
+}
+
+.source-toggle-btn.active {
+    background: #1f1d4d;
+    color: white;
+}
+
+.source-toggle-sep {
+    color: #b5b7c8;
+    font-weight: 300;
+    padding: 0 0.15rem;
+}
+
 /* Mode toggle */
 .mode-toggle {
     position: relative;
@@ -100,10 +143,13 @@
     color: white;
 }
 
+/* The sidebar is a flex column (MainLayout.razor.css): the tree takes whatever height the
+   switches above and the footer below leave, so changing either never needs a magic number. */
 .sidebar-content {
-    height: calc(100vh - 6rem - 2rem);
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding-bottom: 1rem;
+    padding-bottom: 0.5rem;
 }
 
 .sidebar-footer {
@@ -262,4 +308,69 @@
 
 .btn-search-header:hover {
     opacity: 1;
+}
+
+/* ---- Compact density ---- */
+.source-toggle-btn {
+    font-size: 0.72rem;
+    padding: 0.25rem 0.2rem;
+}
+
+.mode-toggle-btn {
+    padding: 0.28rem 0.15rem;
+}
+
+.sidebar-search input {
+    font-size: 0.8rem;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+}
+
+.nav-section {
+    margin-top: 0;
+}
+
+.nav-section-toggle {
+    font-size: 0.74rem;
+    padding: 0.12rem 0;
+}
+
+.nav-item {
+    margin-top: 0;
+}
+
+.nav-item ::deep .nav-link {
+    padding: 0.16rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+.sidebar-divider {
+    margin: 0.3rem 0.75rem;
+}
+
+/* Long folder names truncate rather than widening the sidebar into a sideways scroll. */
+.sidebar-content {
+    overflow-x: hidden;
+}
+
+/* Rows carry their indent as inline padding; count it inside the width, not on top of it. */
+.nav-section {
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+.nav-section-toggle {
+    min-width: 0;
+}
+
+.nav-section-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nav-section-count {
+    flex-shrink: 0;
+    padding-right: 0.5rem;
 }

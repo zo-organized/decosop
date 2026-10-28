@@ -9,6 +9,7 @@
 @inject ContextMenuState MenuState
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@implements IDisposable
 
 @if (IsSop)
 {
@@ -34,6 +35,7 @@ else
                 @(isFavorited ? "★" : "☆")
             </button>
             <div class="sop-actions">
+                <ListMenuButton EntityType="@(IsSop ? ListEntity.SopFile : ListEntity.OfficeDocument)" EntityId="document.Id" />
                 @if (openUri is not null)
                 {
                     <a class="btn btn-sm btn-success" href="@openUri">Open in @openApp</a>
@@ -167,6 +169,18 @@ else
     private IBrowserFile? replaceFile;
     private string? openUri;
     private string? openApp;
+
+    // Favorites can also change from the Lists button or the list column: keep the star in step.
+    protected override void OnInitialized() => Cache.FavoritesChanged += OnFavoritesChanged;
+
+    private void OnFavoritesChanged() => InvokeAsync(async () =>
+    {
+        var prefs = await (IsSop ? Cache.GetSopFilePrefsAsync() : Cache.GetDocDocPrefsAsync());
+        isFavorited = prefs.TryGetValue(Id, out var p) && p.IsFavorited;
+        StateHasChanged();
+    });
+
+    public void Dispose() => Cache.FavoritesChanged -= OnFavoritesChanged;
 
     private async Task<IFileNode?> LoadDocumentAsync()
         => IsSop

@@ -1,0 +1,168 @@
+@page "/online/sops/page/{Id:int}"
+@page "/online/documents/page/{Id:int}"
+@using DecoSOP.Models
+@using DecoSOP.Services
+@using DecoSOP.Services.Online
+@inject OnlineBinderService Online
+@inject NavigationManager Nav
+@inject ContextMenuState MenuState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>@(current?.Title ?? "Page") - DecoSOP</PageTitle>
+
+@if (!loaded)
+{
+    <div class="home-container">
+        <div class="skeleton-line skeleton-title" style="width:40%; height:28px; margin-bottom:1rem;"></div>
+        <div class="skeleton-line" style="width:90%;"></div>
+        <div class="skeleton-line" style="width:75%;"></div>
+    </div>
+}
+else if (current is null)
+{
+    <div class="home-container">
+        <div class="empty-state">
+            <p class="empty-state-title">This page no longer exists</p>
+            <p class="text-muted small">It may have been deleted. <a href="@Base">Back to @HomeTitle</a></p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="home-container">
+        @* One compact bar: where the page lives on the left, what you can do with it on the right.
+           The title itself is on the sheet below, styled as it prints. *@
+        <div class="online-page-bar">
+            <nav class="breadcrumb-nav mb-0" aria-label="breadcrumb">
+                <span class="online-badge">ONLINE</span>
+                <a href="@Base">@HomeTitle</a>
+                @foreach (var crumb in crumbs)
+                {
+                    <span> / </span>
+                    <a href="@Base/section/@crumb.Id">@crumb.Name</a>
+                }
+                <span class="text-muted small ms-2">updated @current.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
+            </nav>
+            <div class="sop-actions">
+                <ListMenuButton EntityType="@ListEntity.OnlinePage" EntityId="current.Id" />
+                <a class="btn btn-sm btn-primary" href="@Base/page/@current.Id/edit">Edit</a>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="Print">Print</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleHistory">History</button>
+                <button class="btn btn-sm btn-outline-danger" @onclick="Delete">Delete</button>
+            </div>
+        </div>
+
+        @if (message is not null)
+        {
+            <div class="alert alert-info py-2">@message</div>
+        }
+
+        @if (showHistory)
+        {
+            <div class="online-history">
+                <h2 class="online-toc-title">Earlier versions</h2>
+                @if (versions.Count == 0)
+                {
+                    <p class="text-muted small mb-0">No earlier versions yet. One is kept every time the page is saved.</p>
+                }
+                else
+                {
+                    <ul class="online-history-list">
+                        @foreach (var v in versions)
+                        {
+                            <li>
+                                <span>Version @v.Version &middot; @v.SavedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt") &middot; “@v.Title”</span>
+                                <button class="btn btn-sm btn-link" @onclick="() => Restore(v)">Restore</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+
+        <article class="online-sheet online-doc">
+            <h1 class="online-doc-title">@current.Title</h1>
+            @((MarkupString)OnlineHtml.Sanitize(current.Html))
+        </article>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private OnlinePage? current;
+    private bool loaded;
+    private List<(int Id, string Name)> crumbs = [];
+    private bool showHistory;
+    private List<OnlinePageVersion> versions = [];
+    private string? message;
+
+    private string Module => Nav.Uri.Contains("/online/documents", StringComparison.OrdinalIgnoreCase)
+        ? OnlineModule.Doc : OnlineModule.Sop;
+    private string Base => $"/online/{OnlineModule.RouteSegment(Module)}";
+    private string HomeTitle => Module == OnlineModule.Doc ? "Online Documents" : "Online SOPs";
+
+    protected override void OnInitialized() => MenuState.OnCategoryModified += OnModified;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        showHistory = false;
+        message = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        current = await Online.GetPageAsync(Id);
+        crumbs = [];
+        if (current?.SectionId is int sid)
+        {
+            var tree = await Online.GetTreeAsync(current.Module);
+            for (var cur = tree.FindSection(sid); cur is not null; cur = cur.Parent)
+                crumbs.Insert(0, (cur.Id, cur.Name));
+        }
+        if (showHistory) versions = await Online.GetVersionsAsync(Id);
+        loaded = true;
+    }
+
+    // Someone saved this page elsewhere: show their version rather than a stale one.
+    private async Task OnModified()
+    {
+        try
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task ToggleHistory()
+    {
+        showHistory = !showHistory;
+        if (showHistory) versions = await Online.GetVersionsAsync(Id);
+    }
+
+    private async Task Restore(OnlinePageVersion v)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm",
+                $"Restore version {v.Version}? The current content is kept as an earlier version, so this can be undone.")) return;
+        var result = await Online.RestoreVersionAsync(Id, v.Id);
+        message = result.Status == OnlineSaveStatus.Saved ? $"Version {v.Version} restored." : "That version could not be restored.";
+        await LoadAsync();
+    }
+
+    private async Task Print()
+        => await JS.InvokeVoidAsync("documentInterop.printPdf", $"/api/online/pages/{Id}/print");
+
+    private async Task Delete()
+    {
+        if (current is null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete \"{current.Title}\"?")) return;
+        var back = current.SectionId is int sid ? $"{Base}/section/{sid}" : Base;
+        await Online.DeletePageAsync(current.Id);
+        Nav.NavigateTo(back);
+    }
+
+    public void Dispose() => MenuState.OnCategoryModified -= OnModified;
+}

@@ -16,7 +16,13 @@ public sealed record SearchHit(
     string FileName, string Extension, string SnippetHtml, double Rank)
 {
     /// <summary>Where clicking this result should go.</summary>
-    public string Url => Module == SearchDb.ModuleDoc ? $"/documents/{FileId}" : $"/sops/{FileId}";
+    public string Url => Module switch
+    {
+        SearchDb.ModuleDoc => $"/documents/{FileId}",
+        SearchDb.ModuleOnlineSop => $"/online/sops/page/{FileId}",
+        SearchDb.ModuleOnlineDoc => $"/online/documents/page/{FileId}",
+        _ => $"/sops/{FileId}",
+    };
 }
 
 public sealed record SearchResults(

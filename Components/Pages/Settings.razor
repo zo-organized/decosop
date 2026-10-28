@@ -1,8 +1,9 @@
 @page "/settings"
-@using DecoSOP.Data
+@using DecoSOP.Models
 @using DecoSOP.Services
-@using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<AppDbContext> DbFactory
+@using DecoSOP.Services.Users
+@inject DatabaseMaintenanceService Maintenance
+@inject AppUserService Users
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject UpdateService UpdateService
@@ -10,7 +11,6 @@
 @inject FolderSyncBackgroundService SyncService
 @inject DecoSOP.Services.Search.SearchIndexService SearchIndex
 @inject DecoSOP.Services.Search.SearchIndexBackgroundService Indexer
-@inject DecoSOP.Data.SearchDb SearchDb
 @implements IDisposable
 
 <PageTitle>Settings - DecoSOP</PageTitle>
@@ -62,29 +62,60 @@
     </div>
 
     <div class="settings-section">
+        <h2>People</h2>
+        <p class="text-muted small">
+            Each person picks their name at the top right; their favorites, pins, folder colours and
+            lists then follow them to any PC. There are no passwords.
+        </p>
+        @if (people.Count == 0)
+        {
+            <p class="text-muted small">Nobody has added their name yet.</p>
+        }
+        else
+        {
+            <div class="doc-meta">
+                @foreach (var person in people)
+                {
+                    <div class="doc-meta-row align-items-center">
+                        <span class="doc-meta-label">@person.Name</span>
+                        <span class="ms-auto">
+                            <button class="btn btn-sm btn-link py-0" @onclick="() => RenamePerson(person)">Rename</button>
+                            <button class="btn btn-sm btn-link py-0 text-danger" @onclick="() => DeletePerson(person)">Remove</button>
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+        @if (peopleMessage is not null)
+        {
+            <div class="alert alert-warning py-1 mt-2 small">@peopleMessage</div>
+        }
+    </div>
+
+    <div class="settings-section">
         <h2>Database Statistics</h2>
         @if (stats is not null)
         {
             <div class="doc-meta">
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">DB Size</span>
-                    <span>@stats.DbFileSize</span>
+                    <span>@stats.FileSize</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">SOP Categories</span>
-                    <span>@stats.SopFileCategoryCount</span>
+                    <span>@stats.SopFolders</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">SOP Files</span>
-                    <span>@stats.SopFileCount</span>
+                    <span>@stats.SopFiles</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Doc Categories</span>
-                    <span>@stats.DocCategoryCount</span>
+                    <span>@stats.DocFolders</span>
                 </div>
                 <div class="doc-meta-row">
                     <span class="doc-meta-label">Documents</span>
-                    <span>@stats.OfficeDocumentCount</span>
+                    <span>@stats.Documents</span>
                 </div>
             </div>
         }
@@ -190,6 +221,15 @@
         <h2>Database Backup</h2>
         <p class="text-muted small">Download a copy of the database. Your documents live in the synced folder — this backs up the category index and each user's favorites, pins, and colors.</p>
         <a href="/api/settings/export-db" class="btn btn-sm btn-primary" download="decosop-backup.db">Export Database</a>
+    </div>
+
+    <div class="settings-section">
+        <h2>Online Binder Backup</h2>
+        <p class="text-muted small">
+            Download a copy of every <strong>ONLINE</strong> page, folder and earlier version. Unlike LOCAL files, these
+            pages exist only on this server — they are not in OneDrive — so keep a recent copy somewhere safe.
+        </p>
+        <a href="/api/settings/export-online-db" class="btn btn-sm btn-primary">Export Online Binder</a>
     </div>
 
     <div class="settings-section">
@@ -361,7 +401,7 @@
         return $"{chars / (1024.0 * 1024.0):F1} MB";
     }
 
-    private DbStats? stats;
+    private DatabaseMaintenanceService.Stats? stats;
     private IBrowserFile? importFile;
     private string importMessage = "";
     private bool importSuccess;
@@ -419,6 +459,38 @@
         UpdateService.OnUpdateChecked += OnUpdateChecked;
         await LoadStats();
         await RefreshIndexStats();
+        people = await Users.GetAllAsync();
+    }
+
+    private List<AppUser> people = [];
+    private string? peopleMessage;
+
+    private async Task RenamePerson(AppUser person)
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Rename:", person.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await RunPeople(() => Users.RenameAsync(person.Id, name));
+    }
+
+    private async Task DeletePerson(AppUser person)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm",
+                $"Remove {person.Name}? Their favorites, pins, folder colours and lists are deleted too. Documents are not affected.")) return;
+        await RunPeople(() => Users.DeleteAsync(person.Id));
+    }
+
+    private async Task RunPeople(Func<Task> action)
+    {
+        try
+        {
+            peopleMessage = null;
+            await action();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            peopleMessage = ex.Message;
+        }
+        people = await Users.GetAllAsync();
     }
 
     private void OnUpdateChecked()
@@ -473,21 +545,7 @@
         UpdateService.OnUpdateChecked -= OnUpdateChecked;
     }
 
-    private async Task LoadStats()
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var dbPath = db.Database.GetDbConnection().DataSource;
-        var fileSize = File.Exists(dbPath) ? new FileInfo(dbPath).Length : 0;
-
-        stats = new DbStats
-        {
-            DbFileSize = SopFileService.FormatFileSize(fileSize),
-            SopFileCategoryCount = await db.SopCategories.CountAsync(),
-            SopFileCount = await db.SopFiles.CountAsync(),
-            DocCategoryCount = await db.DocumentCategories.CountAsync(),
-            OfficeDocumentCount = await db.OfficeDocuments.CountAsync()
-        };
-    }
+    private async Task LoadStats() => stats = await Maintenance.GetStatsAsync();
 
     private void OnImportFileSelected(InputFileChangeEventArgs e)
     {
@@ -504,39 +562,10 @@
 
         try
         {
-            // Read the uploaded file
             using var stream = importFile.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
-            var tempPath = Path.GetTempFileName();
-            await using (var fs = new FileStream(tempPath, FileMode.Create))
-            {
-                await stream.CopyToAsync(fs);
-            }
-
-            // Validate SQLite magic bytes
-            var header = new byte[16];
-            await using (var fs = File.OpenRead(tempPath))
-            {
-                await fs.ReadExactlyAsync(header);
-            }
-
-            var magic = System.Text.Encoding.ASCII.GetString(header, 0, 15);
-            if (magic != "SQLite format 3")
-            {
-                File.Delete(tempPath);
-                importMessage = "Invalid file. Please upload a valid SQLite database.";
-                importSuccess = false;
-                return;
-            }
-
-            // Replace the database file
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var dbPath = db.Database.GetDbConnection().DataSource;
-            await db.Database.CloseConnectionAsync();
-            File.Copy(tempPath, dbPath, overwrite: true);
-            File.Delete(tempPath);
-
-            importMessage = "Database imported successfully. Please restart the application for changes to take effect.";
-            importSuccess = true;
+            var result = await Maintenance.ReplaceDatabaseAsync(stream);
+            importMessage = result.Message;
+            importSuccess = result.Success;
         }
         catch (Exception ex)
         {
@@ -547,14 +576,5 @@
         {
             isImporting = false;
         }
-    }
-
-    private class DbStats
-    {
-        public string DbFileSize { get; set; } = "";
-        public int SopFileCategoryCount { get; set; }
-        public int SopFileCount { get; set; }
-        public int DocCategoryCount { get; set; }
-        public int OfficeDocumentCount { get; set; }
     }
 }

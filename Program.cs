@@ -3,6 +3,7 @@ using DecoSOP.Data;
 using DecoSOP.Models;
 using DecoSOP.Services;
 using DecoSOP.Services.Extraction;
+using DecoSOP.Services.Online;
 using DecoSOP.Services.Search;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,6 +19,11 @@ if (args.Length > 0 && args[0].Equals("extract-report", StringComparison.Ordinal
     SopFileService.DataDirectory = AppContext.BaseDirectory;
     return await ExtractionReport.RunAsync(args);
 }
+
+// One-off migration: bring a folder of Word protocols into the ONLINE binder.
+//   DecoSOP.exe import-online "<folder>" [--module sop|doc] [--db <path>] [--dry-run]
+if (args.Length > 0 && args[0].Equals("import-online", StringComparison.OrdinalIgnoreCase))
+    return await WordImporter.RunAsync(args);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -79,6 +85,12 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}").AddInterceptors(sqlitePragmas), ServiceLifetime.Scoped);
 
+// ONLINE binder: pages written in the app. Its own database file — see OnlineDbContext for why.
+var onlineDbPath = Path.Combine(dataDir, "decosop-online.db");
+builder.Services.AddDbContextFactory<OnlineDbContext>(options =>
+    options.UseSqlite($"Data Source={onlineDbPath}").AddInterceptors(sqlitePragmas));
+builder.Services.AddSingleton<OnlineBinderService>();
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientIdentityService>();
 builder.Services.AddScoped<UserPreferenceService>();
@@ -86,6 +98,10 @@ builder.Services.AddScoped<SopFileService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<DataCacheService>();
 builder.Services.AddScoped<ContextMenuState>();
+builder.Services.AddScoped<DecoSOP.Services.Users.AppUserService>();
+builder.Services.AddScoped<DecoSOP.Services.Users.UserListService>();
+builder.Services.AddScoped<DecoSOP.Services.DatabaseMaintenanceService>();
+builder.Services.AddScoped<DecoSOP.Components.Layout.LayoutState>();
 
 // Content search: text extraction. Extractors are stateless, so they're singletons.
 builder.Services.AddSingleton<ITextExtractor, PlainTextExtractor>();
@@ -114,7 +130,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    await SchemaUpgrader.EnsureTablesAsync(db);   // also adds tables new in this version (users, lists)
 
     var conn = db.Database.GetDbConnection();
     await conn.OpenAsync();
@@ -135,6 +151,12 @@ using (var scope = app.Services.CreateScope())
     // Ensure uploads directories exist
     DocumentService.GetUploadDirectory();
     SopFileService.GetUploadDirectory();
+
+    // Same treatment for the ONLINE binder's database.
+    await using var onlineDb = await scope.ServiceProvider
+        .GetRequiredService<IDbContextFactory<OnlineDbContext>>().CreateDbContextAsync();
+    await SchemaUpgrader.EnsureTablesAsync(onlineDb);
+    await onlineDb.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
 }
 
 app.UseResponseCompression();
@@ -203,6 +225,44 @@ app.MapGet("/api/settings/export-db", () =>
 {
     if (!File.Exists(dbPath)) return Results.NotFound();
     return Results.File(dbPath, "application/octet-stream", "decosop-backup.db");
+});
+
+// ONLINE binder export. Unlike decosop.db this is the only copy of the pages, so it is taken
+// with SQLite's online backup API rather than by copying the file: recent saves may still sit
+// in the WAL, and a plain file copy would silently leave them out.
+app.MapGet("/api/settings/export-online-db", async () =>
+{
+    if (!File.Exists(onlineDbPath)) return Results.NotFound();
+    var tmp = Path.Combine(Path.GetTempPath(), $"decosop-online-{Guid.NewGuid():N}.db");
+    await using (var source = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={onlineDbPath}"))
+    await using (var target = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={tmp};Pooling=False"))
+    {
+        await source.OpenAsync();
+        await target.OpenAsync();
+        source.BackupDatabase(target);
+    }
+    var bytes = await File.ReadAllBytesAsync(tmp);
+    File.Delete(tmp);
+    return Results.File(bytes, "application/octet-stream", $"decosop-online-backup-{DateTime.Now:yyyy-MM-dd}.db");
+});
+
+// Printable ONLINE page: a bare document with just the title and content, which the viewer
+// opens in a new tab and prints.
+app.MapGet("/api/online/pages/{id:int}/print", async (int id, OnlineBinderService online) =>
+{
+    var page = await online.GetPageAsync(id);
+    if (page is null) return Results.NotFound();
+    var title = System.Net.WebUtility.HtmlEncode(page.Title);
+    // The house style (margins, 14pt centered title, 10pt body) comes from the same stylesheet
+    // the page view and editor use; @page in it sets the printed margins.
+    var html = $$"""
+        <!DOCTYPE html>
+        <html lang="en"><head><meta charset="utf-8"><title>{{title}}</title>
+        <link rel="stylesheet" href="/css/online-doc.css">
+        <style> body { margin: 0; } </style></head>
+        <body class="online-doc"><h1 class="online-doc-title">{{title}}</h1>{{OnlineHtml.Sanitize(page.Html)}}</body></html>
+        """;
+    return Results.Content(html, "text/html; charset=utf-8");
 });
 
 app.Run();

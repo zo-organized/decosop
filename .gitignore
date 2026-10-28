@@ -82,3 +82,6 @@ RELEASE_CONTEXT.md
 
 # Machine-local config (holds Azure SQL inventory connection string / secrets)
 appsettings.Local.json
+
+## ONLINE binder import reports (written next to the database by import-online)
+online-import-report-*.csv
