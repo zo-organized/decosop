@@ -15,6 +15,8 @@ public class SearchDbTests
         {
             Assert.True(seen.Add(SearchDb.RowIdFor(SearchDb.ModuleSop, id)), $"SOP {id} collided");
             Assert.True(seen.Add(SearchDb.RowIdFor(SearchDb.ModuleDoc, id)), $"Doc {id} collided");
+            Assert.True(seen.Add(SearchDb.RowIdFor(SearchDb.ModuleOnlineSop, id)), $"Online SOP {id} collided");
+            Assert.True(seen.Add(SearchDb.RowIdFor(SearchDb.ModuleOnlineDoc, id)), $"Online Doc {id} collided");
         }
     }
 
@@ -25,10 +27,17 @@ public class SearchDbTests
     }
 
     [Fact]
-    public void AnUnknownModuleDoesNotSilentlyAliasOntoSop()
+    public void LocalRowIdsAreUnchangedSoExistingIndexesStayValid()
     {
-        // If a third module is ever added, this test should fail rather than the new module's
-        // documents quietly overwriting SOP rows.
-        Assert.Equal(SearchDb.RowIdFor("Sop", 7), SearchDb.RowIdFor("Inventory", 7));
+        // Indexes built before ONLINE pages existed used fileId*2 (+1 for Doc). Changing that
+        // would silently orphan every row in an existing index.
+        Assert.Equal(14, SearchDb.RowIdFor(SearchDb.ModuleSop, 7));
+        Assert.Equal(15, SearchDb.RowIdFor(SearchDb.ModuleDoc, 7));
+    }
+
+    [Fact]
+    public void AnUnknownModuleIsRejectedRatherThanAliasedOntoAnother()
+    {
+        Assert.Throws<ArgumentException>(() => SearchDb.RowIdFor("Inventory", 7));
     }
 }

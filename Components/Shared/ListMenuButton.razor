@@ -1,0 +1,79 @@
+@using DecoSOP.Components.Layout
+@using DecoSOP.Services.Users
+@inject UserListService Lists
+@inject LayoutState Layout
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* "Lists ▾" on a document or page: tick the lists it should be on. *@
+<div class="list-menu">
+    <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleOpen" title="Add to Favorites, To Review or another list">
+        @(membership.Count > 0 ? "☑" : "☐") Lists &#9662;
+    </button>
+    @if (open)
+    {
+        <div class="list-menu-backdrop" @onclick="() => open = false"></div>
+        <div class="list-menu-pop">
+            @foreach (var list in lists)
+            {
+                <label class="list-menu-item">
+                    <input type="checkbox" checked="@membership.Contains(list.Key)" @onchange="() => Toggle(list.Key)" />
+                    <span>@AppHeader.ListIcon(list.Key) @list.Name</span>
+                </label>
+            }
+            <button class="list-menu-item list-menu-new" @onclick="NewList">+ New list…</button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string EntityType { get; set; } = "";
+    [Parameter, EditorRequired] public int EntityId { get; set; }
+
+    private List<ListSummary> lists = [];
+    private HashSet<string> membership = [];
+    private bool open;
+
+    protected override void OnInitialized() => Lists.Changed += OnListsChanged;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        lists = await Lists.GetListsAsync();
+        membership = await Lists.GetMembershipAsync(EntityType, EntityId);
+    }
+
+    // The star elsewhere on the page, or the list column's ×, changes membership too.
+    private void OnListsChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private async Task ToggleOpen()
+    {
+        open = !open;
+        if (open) await LoadAsync();
+    }
+
+    private Task Toggle(string key) => Lists.ToggleAsync(key, EntityType, EntityId);
+
+    private async Task NewList()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Name of the new list:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            var key = await Lists.CreateListAsync(name);
+            await Lists.ToggleAsync(key, EntityType, EntityId);
+            await Layout.SetOpenListAsync(key);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            await JS.InvokeVoidAsync("alert", ex.Message);
+        }
+    }
+
+    public void Dispose() => Lists.Changed -= OnListsChanged;
+}

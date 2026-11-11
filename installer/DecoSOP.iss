@@ -58,7 +58,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Published app files â€” excludes DB and upload dirs (user data)
-Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,decosop-search.db,doc-uploads,sop-uploads"
+Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "decosop.db,decosop-online.db,decosop-search.db,doc-uploads,sop-uploads"
 ; Document-sync setup script (SharePoint/OneDrive via rclone, or a local folder/share)
 Source: "Configure-DecoSOP-Sync.ps1"; DestDir: "{app}"; Flags: ignoreversion
 

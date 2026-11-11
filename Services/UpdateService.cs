@@ -303,7 +303,7 @@ for ($i = 0; $i -lt 10; $i++) {{
 }}
 
 Write-Host 'Copying new files...'
-$skipPatterns = @('decosop.db', 'doc-uploads', 'sop-uploads', 'port.config', 'update-config.json', 'update-staging')
+$skipPatterns = @('decosop.db', 'decosop-online.db', 'doc-uploads', 'sop-uploads', 'port.config', 'update-config.json', 'update-staging')
 
 Get-ChildItem $stagingDir -Recurse | ForEach-Object {{
     $rel = $_.FullName.Substring($stagingDir.Length + 1)

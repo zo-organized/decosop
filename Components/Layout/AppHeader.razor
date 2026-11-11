@@ -1,0 +1,142 @@
+@using DecoSOP.Models
+@using DecoSOP.Services
+@using DecoSOP.Services.Users
+@inject LayoutState Layout
+@inject UserListService Lists
+@inject AppUserService Users
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Top bar of the content area: menu pin, app name, update notice, the current user's lists
+   (each opens the list column), who is browsing, and settings. *@
+<header class="app-header">
+    <button class="app-header-icon app-header-pin" @onclick="TogglePin"
+            title="@(Layout.SidebarPinned ? "Hide the left menu (it slides out when you point at the left edge)" : "Keep the left menu open")">
+        @(Layout.SidebarPinned ? "⇤" : "☰")
+    </button>
+    <a class="app-header-brand" href="">
+        <img src="icon.svg" alt="" width="22" height="22" />DecoSOP
+    </a>
+    <div class="app-header-notice">
+        <UpdateBanner />
+    </div>
+
+    <nav class="app-header-lists" aria-label="Lists">
+        @foreach (var list in lists)
+        {
+            <button class="list-chip @(Layout.OpenList == list.Key ? "active" : "")" @onclick="() => Layout.ToggleListAsync(list.Key)"
+                    title="Show @list.Name beside the page">
+                <span class="list-chip-icon">@ListIcon(list.Key)</span>@list.Name
+                @if (list.Count > 0) { <span class="list-chip-count">@list.Count</span> }
+            </button>
+        }
+        <button class="list-chip list-chip-add" @onclick="AddList" title="Start a new list">+</button>
+    </nav>
+
+    <div class="app-header-user">
+        <button class="user-chip" @onclick="() => userMenuOpen = !userMenuOpen" title="Who is using DecoSOP on this browser">
+            &#128100; @(currentUser?.Name ?? "Choose user") &#9662;
+        </button>
+        @if (userMenuOpen)
+        {
+            <div class="user-menu-backdrop" @onclick="() => userMenuOpen = false"></div>
+            <div class="user-menu">
+                <div class="user-menu-hint">Your favorites, pins and lists follow you to any PC.</div>
+                @foreach (var u in users)
+                {
+                    <button class="user-menu-item @(u.Id == currentUser?.Id ? "active" : "")" @onclick="() => SwitchTo(u.Id)">@u.Name</button>
+                }
+                <button class="user-menu-item user-menu-add" @onclick="AddUser">+ Add me…</button>
+                @if (currentUser is not null)
+                {
+                    <button class="user-menu-item user-menu-muted" @onclick="() => SwitchTo(null)">Use this PC's setup (no name)</button>
+                }
+                @if (userError is not null) { <div class="user-menu-error">@userError</div> }
+            </div>
+        }
+    </div>
+
+    <a class="app-header-icon" href="settings" title="Settings">&#9881;</a>
+</header>
+
+@code {
+    private List<ListSummary> lists = [];
+    private List<AppUser> users = [];
+    private AppUser? currentUser;
+    private bool userMenuOpen;
+    private string? userError;
+
+    public static string ListIcon(string key) => key switch
+    {
+        UserListService.FavoritesKey => "★",
+        UserListService.ReviewKey => "☑",
+        _ => "▤"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Layout.Changed += OnLayoutChanged;
+        Lists.Changed += OnListsChanged;
+        users = await Users.GetAllAsync();
+        currentUser = await Users.GetCurrentAsync();
+        lists = await Lists.GetListsAsync();
+    }
+
+    private void OnLayoutChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnListsChanged() => InvokeAsync(async () =>
+    {
+        lists = await Lists.GetListsAsync();
+        StateHasChanged();
+    });
+
+    private Task TogglePin() => Layout.SetSidebarPinnedAsync(!Layout.SidebarPinned);
+
+    private async Task AddList()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Name of the new list (e.g. Training, Front Desk):");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            var key = await Lists.CreateListAsync(name);
+            await Layout.SetOpenListAsync(key);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            await JS.InvokeVoidAsync("alert", ex.Message);
+        }
+    }
+
+    private async Task AddUser()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Your name:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            var user = await Users.AddAsync(name);
+            await SwitchTo(user.Id);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            userError = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Whose setup this browser uses is read once per connection, so switching reloads the page.
+    /// The open list belongs to the previous person, so it is closed first.
+    /// </summary>
+    private async Task SwitchTo(int? userId)
+    {
+        await Layout.SetOpenListAsync(null);
+        await JS.InvokeVoidAsync("decoLayout.setCookie", ClientIdentityService.UserCookie, userId?.ToString() ?? "");
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        Layout.Changed -= OnLayoutChanged;
+        Lists.Changed -= OnListsChanged;
+    }
+}

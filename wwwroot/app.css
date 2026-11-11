@@ -468,6 +468,150 @@ h1:focus {
 .badge-png, .badge-jpg, .badge-jpeg, .badge-gif { background: #6f42c1; }
 .badge-zip { background: #fd7e14; }
 .badge-wdoc { background: #00897b; }
+.badge-page { background: #5b4bb7; }
+
+/* ---- ONLINE binder ---- */
+.online-badge {
+    display: inline-block;
+    vertical-align: middle;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: white;
+    background: #5b4bb7;
+    padding: 0.15rem 0.45rem;
+    border-radius: 3px;
+    margin-right: 0.4rem;
+    position: relative;
+    top: -0.2em;
+}
+
+.online-toc, .online-history {
+    background: white;
+    border: 1px solid #e3e5ee;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.online-toc-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b6f86;
+    margin: 0 0 0.6rem 0;
+}
+
+.online-toc-list {
+    margin: 0;
+    padding-left: 1.4rem;
+}
+
+.online-toc-list li {
+    padding: 0.2rem 0;
+}
+
+.online-toc-list li a {
+    font-weight: 500;
+    margin-right: 0.5rem;
+}
+
+.online-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.online-history-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #f0f1f6;
+    font-size: 0.875rem;
+}
+
+/* Page content styling (margins, title, font sizes) lives in css/online-doc.css. */
+.online-page-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+
+/* Editor: heading, Title, Save in and buttons share one row; the editor takes the rest. */
+.online-editor-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+    margin-bottom: 0.4rem;
+}
+
+.online-editor-heading {
+    margin: 0;
+    font-size: 1.1rem;
+    white-space: nowrap;
+}
+
+.online-editor-field {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    min-width: 0;
+}
+
+.online-editor-field > span {
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.online-editor-title { flex: 3 1 16rem; }
+.online-editor-location { flex: 2 1 12rem; }
+
+.online-editor-field .form-control,
+.online-editor-field .form-select {
+    min-width: 0;
+}
+
+/* Word-like toolbar: small buttons, one row (overflow goes behind a "…" button). */
+.online-editor .tox .tox-toolbar__group {
+    padding: 0 2px;
+}
+
+.online-editor .tox .tox-tbtn {
+    height: 26px;
+    width: 26px;
+    margin: 1px 0;
+}
+
+.online-editor .tox .tox-tbtn--select,
+.online-editor .tox .tox-tbtn--bespoke {
+    width: auto;
+}
+
+.online-editor .tox .tox-tbtn svg {
+    transform: scale(0.8);
+}
+
+.online-editor .tox .tox-tbtn__select-label {
+    font-size: 12px;
+    margin: 0 2px;
+}
+
+.online-editor .tox .tox-split-button {
+    margin: 1px 0;
+}
+
+.online-editor .tox .tox-split-button .tox-tbtn {
+    width: auto;
+}
 
 .doc-meta {
     margin-top: 1.5rem;
@@ -1708,4 +1852,379 @@ h1:focus {
 .search-hit-head .file-type-icon {
     width: 0.95rem;
     height: 0.95rem;
+}
+
+/* ============================================
+   Compact density — smaller base size and tighter spacing everywhere
+   ============================================ */
+html {
+    font-size: 14px;
+}
+
+.content {
+    padding-top: 0.6rem;
+}
+
+.home-container h1 {
+    font-size: 1.5rem;
+}
+
+.home-container .lead {
+    font-size: 1rem;
+    margin-bottom: 0.9rem;
+}
+
+.category-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(270px, 100%), 1fr));
+    gap: 0.5rem;
+}
+
+.category-card {
+    padding: 0.55rem 0.75rem;
+}
+
+.category-card h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.4rem;
+}
+
+.category-card li,
+.card-doc-list li {
+    padding: 0.1rem 0;
+}
+
+.sop-toolbar {
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.4rem;
+}
+
+.favorites-section {
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+}
+
+/* ---- App header (blue bar across the top of the content area) ---- */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2.5rem;
+    padding: 0.25rem 0.75rem 0.25rem 1rem;
+    background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
+    color: white;
+}
+
+.app-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: white;
+    font-size: 1.15rem;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.app-header-brand:hover {
+    color: white;
+}
+
+.app-header-notice {
+    flex: 1;
+    min-width: 0;
+}
+
+/* The update notice sits inside the header rather than as its own band. */
+.app-header .update-banner {
+    background: none;
+    padding: 0;
+    font-size: 0.85rem;
+    border-left: 1px solid rgba(255,255,255,0.3);
+    padding-left: 0.75rem;
+}
+
+.app-header-icon {
+    color: rgba(255,255,255,0.75);
+    font-size: 1.1rem;
+    line-height: 1;
+    text-decoration: none;
+}
+
+.app-header-icon:hover {
+    color: white;
+}
+
+.app-header-star {
+    color: #ffc94d;
+}
+
+@media print {
+    .app-header {
+        display: none !important;
+    }
+}
+
+/* ---- Header lists, user menu ---- */
+.app-header-pin {
+    background: none;
+    border: none;
+    padding: 0 0.15rem;
+    font-size: 1.05rem;
+    cursor: pointer;
+}
+
+.app-header-lists {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.list-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.25);
+    color: white;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.1rem 0.6rem;
+    line-height: 1.5;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.list-chip:hover { background: rgba(255,255,255,0.22); }
+
+.list-chip.active {
+    background: white;
+    color: #0d47a1;
+}
+
+.list-chip-icon { color: #ffc94d; }
+.list-chip.active .list-chip-icon { color: #f5a623; }
+
+.list-chip-count {
+    background: rgba(0,0,0,0.25);
+    border-radius: 999px;
+    padding: 0 0.4rem;
+    font-size: 0.7rem;
+}
+
+.list-chip.active .list-chip-count { background: #e3ecfa; }
+
+.list-chip-add {
+    padding: 0.1rem 0.5rem;
+    font-weight: 700;
+}
+
+.app-header-user { position: relative; }
+
+.user-chip {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.9);
+    font-size: 0.82rem;
+    white-space: nowrap;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+}
+
+.user-chip:hover { color: white; }
+
+.user-menu-backdrop,
+.list-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+}
+
+.user-menu,
+.list-menu-pop {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 31;
+    min-width: 13rem;
+    background: white;
+    color: #212529;
+    border: 1px solid #d0d7e2;
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    padding: 0.3rem;
+}
+
+.user-menu-hint {
+    font-size: 0.72rem;
+    color: #6c757d;
+    padding: 0.2rem 0.4rem 0.35rem;
+}
+
+.user-menu-item,
+.list-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.85rem;
+    color: inherit;
+    cursor: pointer;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.user-menu-item:hover,
+.list-menu-item:hover { background: #eef3fb; }
+
+.user-menu-item.active { font-weight: 700; background: #e3ecfa; }
+.user-menu-add, .list-menu-new { color: #0d6efd; border-top: 1px solid #eee; border-radius: 0; margin-top: 0.2rem; }
+.user-menu-muted { color: #6c757d; font-size: 0.78rem; }
+.user-menu-error { color: #b02a37; font-size: 0.78rem; padding: 0.2rem 0.5rem; }
+
+.list-menu {
+    position: relative;
+    display: inline-block;
+}
+
+/* ---- List column: between the menu and the page ---- */
+.main-body {
+    display: flex;
+    align-items: flex-start;
+}
+
+.main-body > .content {
+    flex: 1;
+    min-width: 0;
+}
+
+.list-panel {
+    position: sticky;
+    top: 2.5rem;
+    width: 260px;
+    flex-shrink: 0;
+    height: calc(100vh - 2.5rem);
+    overflow-y: auto;
+    background: #f6f8fb;
+    border-right: 1px solid #dde3ec;
+    font-size: 0.85rem;
+}
+
+.list-panel-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.45rem 0.4rem 0.45rem 0.75rem;
+    background: #eaf0f8;
+    border-bottom: 1px solid #dde3ec;
+}
+
+.list-panel-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+    color: #0d47a1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.list-panel-btn {
+    background: none;
+    border: none;
+    color: #6c757d;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.15rem 0.3rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.list-panel-btn:hover { background: #dbe5f3; color: #212529; }
+
+.list-panel-empty {
+    padding: 0.75rem;
+    color: #6c757d;
+    font-size: 0.8rem;
+}
+
+.list-panel-items {
+    list-style: none;
+    margin: 0;
+    padding: 0.25rem 0;
+}
+
+.list-panel-items li {
+    display: flex;
+    align-items: flex-start;
+    border-left: 3px solid transparent;
+}
+
+.list-panel-items li:hover { background: #edf2f9; }
+
+.list-panel-items li.active {
+    background: #dfe9f7;
+    border-left-color: #1565c0;
+}
+
+.list-panel-items li.missing { color: #999; font-style: italic; padding: 0.3rem 0 0.3rem 0.75rem; }
+.list-panel-items li.missing .list-item-title { flex: 1; }
+
+.list-item-link {
+    flex: 1;
+    min-width: 0;
+    display: block;
+    padding: 0.3rem 0.25rem 0.3rem 0.65rem;
+    color: #212529;
+    text-decoration: none;
+}
+
+.list-item-title {
+    display: block;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.list-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: #6c757d;
+    font-size: 0.72rem;
+    margin-top: 0.1rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.list-item-remove {
+    background: none;
+    border: none;
+    color: #aab;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+    visibility: hidden;
+}
+
+.list-panel-items li:hover .list-item-remove { visibility: visible; }
+.list-item-remove:hover { color: #b02a37; }
+
+.badge-online { background: #6f42c1; color: white; }
+.badge-folder { background: #e9ecef; color: #495057; }
+
+@media print {
+    .list-panel { display: none !important; }
 }

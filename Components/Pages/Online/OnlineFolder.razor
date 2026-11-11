@@ -1,0 +1,228 @@
+@page "/online/sops"
+@page "/online/documents"
+@page "/online/sops/section/{Id:int}"
+@page "/online/documents/section/{Id:int}"
+@using DecoSOP.Models
+@using DecoSOP.Services
+@using DecoSOP.Services.Online
+@inject OnlineBinderService Online
+@inject NavigationManager Nav
+@inject ContextMenuState MenuState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>@(section?.Name ?? HomeTitle) - DecoSOP</PageTitle>
+
+@if (tree is null)
+{
+    <div class="home-container">
+        <div class="skeleton-line skeleton-title" style="width:30%; height:28px; margin-bottom:1rem;"></div>
+        <SkeletonCards Count="6" />
+    </div>
+}
+else if (Id is not null && section is null)
+{
+    <div class="home-container">
+        <div class="empty-state">
+            <p class="empty-state-title">This folder no longer exists</p>
+            <p class="text-muted small"><a href="@Base">Back to @HomeTitle</a></p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="home-container">
+        @if (section is not null)
+        {
+            <nav class="breadcrumb-nav" aria-label="breadcrumb">
+                <a href="@Base">@HomeTitle</a>
+                @foreach (var crumb in Crumbs(section))
+                {
+                    <span> / </span>
+                    @if (crumb.Id == section.Id) { <span>@crumb.Name</span> }
+                    else { <a href="@Base/section/@crumb.Id">@crumb.Name</a> }
+                }
+            </nav>
+        }
+
+        <div class="sop-toolbar" style="border-bottom:none; padding-bottom:0; margin-bottom:0.5rem;">
+            <h1 style="margin:0;">
+                <span class="online-badge">ONLINE</span>
+                @(section?.Name ?? HomeTitle)
+            </h1>
+            <div class="sop-actions">
+                <a class="btn btn-sm btn-success" href="@NewPageHref">+ New Page</a>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CreateFolder">+ New Folder</button>
+                @if (section is not null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="RenameFolder">Rename</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="DeleteFolder">Delete folder</button>
+                }
+            </div>
+        </div>
+        @if (section is null)
+        {
+            <p class="lead">Pages written here in DecoSOP. <span class="text-muted small">(@tree.TotalPages page@(tree.TotalPages == 1 ? "" : "s"))</span></p>
+        }
+
+        @if (error is not null)
+        {
+            <div class="alert alert-warning py-2">@error</div>
+        }
+
+        @* --- Table of contents: this folder's own pages, in order --- *@
+        @if (Pages.Count > 0)
+        {
+            <div class="online-toc">
+                <h2 class="online-toc-title">Contents</h2>
+                <ol class="online-toc-list">
+                    @foreach (var pg in Pages)
+                    {
+                        <li>
+                            <a href="@Base/page/@pg.Id">@pg.Title</a>
+                            <span class="text-muted small">updated @pg.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                        </li>
+                    }
+                </ol>
+            </div>
+        }
+
+        @* --- Subfolders --- *@
+        @if (Folders.Count == 0 && Pages.Count == 0)
+        {
+            <div class="empty-state">
+                <p class="empty-state-title">@(section is null ? "The online binder is empty" : "This folder is empty")</p>
+                <p class="text-muted small">Use <strong>+ New Page</strong> to write one, or <strong>+ New Folder</strong> to organise.</p>
+            </div>
+        }
+
+        <div class="category-grid">
+            @foreach (var folder in Folders)
+            {
+                <div class="category-card">
+                    <h3>
+                        <FolderIcon />
+                        <a href="@Base/section/@folder.Id" class="category-heading-link">@folder.Name</a>
+                        <span class="text-muted small">(@folder.TotalPages)</span>
+                    </h3>
+                    @if (folder.Children.Count > 0)
+                    {
+                        <p class="text-muted small" style="margin:0 0 0.25rem 0;">@folder.Children.Count subfolder@(folder.Children.Count != 1 ? "s" : "")</p>
+                    }
+                    @if (folder.Pages.Count > 0)
+                    {
+                        <ul class="card-doc-list">
+                            @foreach (var pg in folder.Pages)
+                            {
+                                <li><a href="@Base/page/@pg.Id">@pg.Title</a> <span class="file-type-badge badge-page">PAGE</span></li>
+                            }
+                        </ul>
+                    }
+                    @if (folder.TotalPages == 0)
+                    {
+                        <p class="text-muted small" style="margin:0;">Empty</p>
+                    }
+                </div>
+            }
+            <div class="new-folder-card" @onclick="CreateFolder">
+                <span>+ New Folder</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private OnlineTree? tree;
+    private OnlineSectionNode? section;
+    private string? error;
+
+    private string Module => Nav.Uri.Contains("/online/documents", StringComparison.OrdinalIgnoreCase)
+        ? OnlineModule.Doc : OnlineModule.Sop;
+    private string Base => $"/online/{OnlineModule.RouteSegment(Module)}";
+    private string HomeTitle => Module == OnlineModule.Doc ? "Online Documents" : "Online SOPs";
+    // From the route, not the loaded section: right after navigating, the section is still loading
+    // and a quick click must not land the new page at the top level.
+    private string NewPageHref => Id is int id ? $"{Base}/new?section={id}" : $"{Base}/new";
+
+    private IReadOnlyList<OnlineSectionNode> Folders => section?.Children ?? tree?.Sections ?? [];
+    private IReadOnlyList<OnlinePageInfo> Pages => section?.Pages ?? tree?.RootPages ?? [];
+
+    protected override void OnInitialized() => MenuState.OnCategoryModified += OnModified;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        error = null;
+        // Show the folder from the tree already in hand straight away, then refresh it.
+        if (tree is not null) section = Id is int id ? tree.FindSection(id) : null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        tree = await Online.GetTreeAsync(Module);
+        section = Id is int id ? tree.FindSection(id) : null;
+    }
+
+    // Another tab (or another person) changed the binder: refresh what is on screen.
+    private async Task OnModified()
+    {
+        try
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private static IEnumerable<(int Id, string Name)> Crumbs(OnlineSectionNode node)
+    {
+        var list = new List<(int, string)>();
+        for (var cur = node; cur is not null; cur = cur.Parent) list.Insert(0, (cur.Id, cur.Name));
+        return list;
+    }
+
+    private async Task CreateFolder()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", section is null ? "New folder name:" : "New subfolder name:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await Run(() => Online.CreateSectionAsync(Module, name, section?.Id));
+    }
+
+    private async Task RenameFolder()
+    {
+        if (section is null) return;
+        var name = await JS.InvokeAsync<string?>("prompt", "Rename folder:", section.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await Run(() => Online.RenameSectionAsync(section.Id, name));
+    }
+
+    private async Task DeleteFolder()
+    {
+        if (section is null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete the folder \"{section.Name}\"? Only empty folders can be deleted.")) return;
+        var parentHref = section.ParentId is int pid ? $"{Base}/section/{pid}" : Base;
+        if (await Run(() => Online.DeleteSectionAsync(section.Id)))
+            Nav.NavigateTo(parentHref);
+    }
+
+    /// <summary>Run a binder change, showing a validation message instead of crashing the page.</summary>
+    private async Task<bool> Run(Func<Task> action)
+    {
+        try
+        {
+            error = null;
+            await action();
+            await LoadAsync();
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    public void Dispose() => MenuState.OnCategoryModified -= OnModified;
+}

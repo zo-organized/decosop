@@ -1,0 +1,244 @@
+@page "/online/sops/new"
+@page "/online/documents/new"
+@page "/online/sops/page/{Id:int}/edit"
+@page "/online/documents/page/{Id:int}/edit"
+@using System.Text
+@using DecoSOP.Models
+@using DecoSOP.Services.Online
+@inject OnlineBinderService Online
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@(IsNew ? "New page" : $"Edit {title}") - DecoSOP</PageTitle>
+
+<NavigationLock OnBeforeInternalNavigation="ConfirmLeave" />
+
+<div class="home-container online-editor">
+    @* One row: heading | Title | Save in | buttons — so the page itself gets the screen. *@
+    <div class="online-editor-bar">
+        <h1 class="online-editor-heading"><span class="online-badge">ONLINE</span> @(IsNew ? "New page" : "Edit page")</h1>
+        @if (!notFound)
+        {
+            <label class="online-editor-field online-editor-title">
+                <span>Title</span>
+                <input id="page-title" class="form-control form-control-sm" maxlength="200" @bind="title" @bind:event="oninput"
+                       placeholder="e.g. Sterilization procedure" />
+            </label>
+            <label class="online-editor-field online-editor-location"
+                   title="Filled in with the folder you were in. Change it if you were in the wrong place.">
+                <span>Save in</span>
+                <select id="page-location" class="form-select form-select-sm" @bind="location">
+                    <option value="">(Top level of @HomeTitle)</option>
+                    @if (tree is not null)
+                    {
+                        @foreach (var loc in tree.Locations())
+                        {
+                            <option value="@loc.Id">@loc.Path</option>
+                        }
+                    }
+                </select>
+            </label>
+        }
+        <div class="sop-actions">
+            <button class="btn btn-sm btn-success" @onclick="Save" disabled="@(saving || !ready)">
+                @(saving ? "Saving…" : "Save")
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Cancel" disabled="@saving">Cancel</button>
+        </div>
+    </div>
+
+    @if (notFound)
+    {
+        <div class="empty-state">
+            <p class="empty-state-title">This page no longer exists</p>
+            <p class="text-muted small"><a href="@Base">Back to @HomeTitle</a></p>
+        </div>
+    }
+    else
+    {
+        @if (error is not null)
+        {
+            <div class="alert alert-warning py-2">@error</div>
+        }
+
+        @if (conflict is not null)
+        {
+            <div class="alert alert-danger">
+                <strong>Someone else saved this page</strong> at @conflict.UpdatedAt.ToLocalTime().ToString("h:mm tt")
+                while you were editing. Saving now would replace their changes.
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-danger" @onclick="Overwrite">Save mine anyway</button>
+                    <a class="btn btn-sm btn-outline-secondary" href="@Base/page/@Id" target="_blank">Open their version in a new tab</a>
+                    <button class="btn btn-sm btn-link" @onclick="() => conflict = null">Keep editing</button>
+                </div>
+                <div class="small mt-1">Either way nothing is lost: their version is kept in the page's history if you save over it.</div>
+            </div>
+        }
+
+        @if (!ready)
+        {
+            <div class="text-muted small mb-2">Loading editor…</div>
+        }
+        @* Empty on purpose: TinyMCE builds its UI inside, and Blazor must have nothing here to diff. *@
+        <div id="@HostId" class="online-editor-host"></div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    [SupplyParameterFromQuery(Name = "section")] public int? SectionParam { get; set; }
+
+    private const string HostId = "online-editor";
+
+    private OnlineTree? tree;
+    private string title = string.Empty;
+    private string location = string.Empty;   // section id as text; "" = top level
+    private string initialHtml = string.Empty;
+    private int version;
+    private bool loaded, ready, saving, notFound, leaving;
+    private bool editorStarted;
+    private string? error;
+    private OnlinePage? conflict;
+
+    private bool IsNew => Id is null;
+    private string Module => Nav.Uri.Contains("/online/documents", StringComparison.OrdinalIgnoreCase)
+        ? OnlineModule.Doc : OnlineModule.Sop;
+    private string Base => $"/online/{OnlineModule.RouteSegment(Module)}";
+    private string HomeTitle => Module == OnlineModule.Doc ? "Online Documents" : "Online SOPs";
+    private int? SelectedSection => int.TryParse(location, out var id) ? id : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        tree = await Online.GetTreeAsync(Module);
+
+        if (IsNew)
+        {
+            // Pre-select where the user came from, if that folder still exists.
+            if (SectionParam is int sid && tree.FindSection(sid) is not null) location = sid.ToString();
+        }
+        else
+        {
+            var page = await Online.GetPageAsync(Id!.Value);
+            if (page is null || page.Module != Module)
+            {
+                notFound = true;
+                return;
+            }
+            title = page.Title;
+            initialHtml = page.Html;
+            version = page.Version;
+            location = page.SectionId?.ToString() ?? string.Empty;
+        }
+        loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!loaded || editorStarted) return;
+        editorStarted = true;
+        try
+        {
+            await JS.InvokeVoidAsync("onlineEditor.init", HostId, initialHtml);
+            await JS.InvokeVoidAsync("onlineEditor.guardUnload", HostId, true);
+            ready = true;
+        }
+        catch (JSException ex)
+        {
+            error = $"The editor could not be loaded: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    private async Task<string> ReadEditorHtmlAsync()
+    {
+        var streamRef = await JS.InvokeAsync<IJSStreamReference>("onlineEditor.getContent", HostId);
+        await using var stream = await streamRef.OpenReadStreamAsync(maxAllowedSize: OnlineHtml.MaxHtmlChars * 4L);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return await reader.ReadToEndAsync();
+    }
+
+    private Task Save() => SaveAsync(overwrite: false);
+
+    private Task Overwrite() => SaveAsync(overwrite: true);
+
+    private async Task SaveAsync(bool overwrite)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            error = "Give the page a title before saving.";
+            return;
+        }
+
+        saving = true;
+        error = null;
+        try
+        {
+            var html = await ReadEditorHtmlAsync();
+            int pageId;
+            if (IsNew)
+            {
+                pageId = (await Online.CreatePageAsync(Module, SelectedSection, title, html)).Id;
+            }
+            else
+            {
+                var result = await Online.SavePageAsync(Id!.Value, SelectedSection, title, html, version, overwrite);
+                switch (result.Status)
+                {
+                    case OnlineSaveStatus.Conflict:
+                        conflict = result.Current;
+                        return;
+                    case OnlineSaveStatus.NotFound:
+                        error = "This page was deleted while you were editing it. Copy your text out before leaving.";
+                        return;
+                }
+                pageId = Id.Value;
+            }
+
+            await JS.InvokeVoidAsync("onlineEditor.markClean", HostId);
+            leaving = true;
+            Nav.NavigateTo($"{Base}/page/{pageId}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        if (IsNew)
+            Nav.NavigateTo(SelectedSection is int sid ? $"{Base}/section/{sid}" : Base);
+        else
+            Nav.NavigateTo($"{Base}/page/{Id}");
+    }
+
+    /// <summary>Ask before leaving the editor with unsaved changes.</summary>
+    private async Task ConfirmLeave(LocationChangingContext context)
+    {
+        if (leaving || !ready) return;
+        try
+        {
+            if (await JS.InvokeAsync<bool>("onlineEditor.isDirty", HostId)
+                && !await JS.InvokeAsync<bool>("confirm", "You have unsaved changes. Leave without saving?"))
+            {
+                context.PreventNavigation();
+            }
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("onlineEditor.guardUnload", HostId, false);
+            await JS.InvokeVoidAsync("onlineEditor.destroy", HostId);
+        }
+        catch (JSDisconnectedException) { }
+    }
+}

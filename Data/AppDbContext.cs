@@ -12,9 +12,33 @@ public class AppDbContext : DbContext
     public DbSet<SopCategory> SopCategories => Set<SopCategory>();
     public DbSet<SopFile> SopFiles => Set<SopFile>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
+    public DbSet<AppUser> AppUsers => Set<AppUser>();
+    public DbSet<UserList> UserLists => Set<UserList>();
+    public DbSet<UserListItem> UserListItems => Set<UserListItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AppUser>(e =>
+        {
+            e.Property(u => u.Name).UseCollation("NOCASE");
+            e.HasIndex(u => u.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<UserList>(e =>
+        {
+            e.Property(l => l.Name).UseCollation("NOCASE");
+            e.HasIndex(l => new { l.OwnerKey, l.Name }).IsUnique();
+            e.HasMany(l => l.Items)
+             .WithOne(i => i.List)
+             .HasForeignKey(i => i.ListId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserListItem>(e =>
+        {
+            e.HasIndex(i => new { i.ListId, i.EntityType, i.EntityId }).IsUnique();
+        });
+
         modelBuilder.Entity<UserPreference>(e =>
         {
             e.HasIndex(p => new { p.ClientId, p.EntityType, p.EntityId }).IsUnique();

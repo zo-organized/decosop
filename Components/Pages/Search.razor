@@ -291,8 +291,13 @@
     private string HitUrl(SearchHit hit)
         => string.IsNullOrWhiteSpace(Query) ? hit.Url : $"{hit.Url}?q={Uri.EscapeDataString(Query)}";
 
-    private static string ModuleLabel(string module)
-        => module == SearchDb.ModuleDoc ? "Documents" : "SOPs";
+    private static string ModuleLabel(string module) => module switch
+    {
+        SearchDb.ModuleDoc => "Documents",
+        SearchDb.ModuleOnlineSop => "Online SOPs",
+        SearchDb.ModuleOnlineDoc => "Online Docs",
+        _ => "SOPs",
+    };
 
     private static bool IsScanKind(string ext)
         => ext is "pdf" or "jpg" or "jpeg" or "png" or "tif" or "tiff";

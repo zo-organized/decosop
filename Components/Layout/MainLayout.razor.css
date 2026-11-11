@@ -6,6 +6,7 @@
 
 main {
     flex: 1;
+    min-width: 0;   /* may shrink below its content (the 8.5in sheet), so nothing scrolls sideways */
 }
 
 .sidebar {
@@ -52,7 +53,9 @@ main {
     }
 
     .sidebar {
-        width: 380px;
+        display: flex;
+        flex-direction: column;
+        width: 300px;
         min-width: 200px;
         max-width: 50vw;
         height: 100vh;
@@ -116,3 +119,31 @@ main {
         right: 0.75rem;
         top: 0.5rem;
     }
+
+/* Unpinned menu: tucked off-screen except an 8px strip on the left edge; pointing at the strip
+   slides it out over the page, and it tucks away again when the pointer leaves. */
+@media (min-width: 641px) {
+    .page.sidebar-unpinned .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 40;
+        transform: translateX(calc(-100% + 8px));
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .page.sidebar-unpinned .sidebar:hover,
+    .page.sidebar-unpinned .sidebar:focus-within {
+        transform: none;
+        box-shadow: 4px 0 18px rgba(0, 0, 0, 0.3);
+    }
+
+    .page.sidebar-unpinned .sidebar-resizer {
+        display: none;
+    }
+
+    /* Room for the strip, so it never covers the page. */
+    .page.sidebar-unpinned main {
+        margin-left: 8px;
+    }
+}
